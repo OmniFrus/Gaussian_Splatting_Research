@@ -1,0 +1,14 @@
+build/
+install/
+log/
+dependencies/
+images/
+weights/
+__pycache__/
+yolov8n.pt
+yolo11n.pt
+yolo11n-seg.pt
+camera_test/
+content/
+*.zip
+runs/
