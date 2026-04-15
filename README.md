@@ -1,24 +1,36 @@
 <div align="center">
-<h1>A2: Foundation Models for 3D Object Tracking (FMObject)</h1>
+<h1>A2: Semantic Scene Understanding for 3D Representation</h1>
 [**Wesley Haverkort**](mailto:w.j.haverkort@student.rug.nl)
 [**Lars Hidding**](mailto:l.hidding.1@student.rug.nl)
 </div>
 
 ## Sync slides
-https://docs.google.com/presentation/d/1ioU0Bz3pH50mXnqPpxjEqHX3ZRrUq6BBKUTdcfEVIbw/edit?usp=drive_link
+[https://docs.google.com/presentation/d/1ioU0Bz3pH50mXnqPpxjEqHX3ZRrUq6BBKUTdcfEVIbw/edit?usp=drive_link](https://docs.google.com/presentation/d/1jmmtQW7J8PL43zMLR3hJySDBDvEeZ5zam7DdNb1mGiw/edit?slide=id.g3e5fd4c6abe_1_0#slide=id.g3e5fd4c6abe_1_0)
 
 ## Progress
 Last updated: Jan 30 2026
 
-
-- [ ] Switch between pointcloud algorithms.
-- [ ] Add pre- and post-processing to segmentation step.
-- [ ] Explore other tracking methods.
-- [ ] Overhaul UI
+- [ ] Replace object-centric pipeline with full-image semantic segmentation (SegFormer).
+- [ ] Publish semantic segmentation outputs (`/semantic_image`).
+- [ ] Extend pipeline to generate semantic point clouds.
+- [ ] Integrate depth data for 3D semantic reconstruction.
+- [ ] Explore advanced models (e.g., DFormer) as potential improvements.
+- [ ] Prepare pipeline for Gaussian Splatting integration.
+- [ ] Overhaul UI for semantic-based interaction instead of object tracking.
 - [ ] Improve performance on Jetson Orin Nano by decreasing CPU usage.
-- [ ] Run new performance tests.
+- [ ] Run new performance and robustness tests.
 - [ ] Update launch file and write documentation.
-- [ ] Implement reading of IMU data.
+
+## Overview
+
+This project focuses on **semantic scene understanding and 3D representation** using RGB-D data.
+
+Instead of tracking individual objects, the system processes the **entire image** and assigns a semantic label to each pixel. These labels are then combined with depth data to construct a **semantically enriched 3D representation** of the scene.
+
+The pipeline is designed to support:
+- Semantic segmentation (2D)
+- Semantic point cloud generation (3D)
+- Future integration with **Gaussian Splatting** for multi-view scene reconstruction
 
 ## Setup
 
@@ -52,28 +64,6 @@ ros2 run localizer config_ui
 ```
 
 Setup your parameters and click start. Click somewhere on the image to start tracking that object (It can only track things that are trained in YOLO).
-
-## Performance
-
-### Performance on lab computers (Cuda 13) [Nov 24 2025]
-| **Duration per step**         | **Mean duration** |
-|-------------------------------|-------------------|
-| Total time elapsed            |        1.2607 sec |
-| Depth Anything                |        0.7893 sec |
-| MobileSAM                     |        0.3694 sec |
-| MobileSAM (without set_image) |        0.0239 sec |
-| Others                        |        0.1020 sec |
-
-### Performance on Jetson Orin Nano (Cuda 12.6) [Dec 4 2025]
-| **Duration per step**         | **Mean duration** |
-|-------------------------------|-------------------|
-| Total time elapsed            |             - sec |
-| Depth Anything                |             - sec |
-| MobileSAM                     |             - sec |
-| MobileSAM (without set_image) |             - sec |
-| Others                        |             - sec |
-
-*More performance details coming soon...*
 
 ## Remote viewing
 To remotely view your screen use nomachine by starting the `nxserver` service and connecting to it using the nomachine app on your mobile device.
