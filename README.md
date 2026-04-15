@@ -1,7 +1,6 @@
 <div align="center">
 <h1>A2: Semantic Scene Understanding for 3D Representation</h1>
 [**Wesley Haverkort**](mailto:w.j.haverkort@student.rug.nl)
-[**Lars Hidding**](mailto:l.hidding.1@student.rug.nl)
 </div>
 
 ## Sync slides
