@@ -35,10 +35,10 @@ class ConfigUI:
                 font=("Arial", 8), fg="gray").grid(row=1, column=2, padx=5)
         
         # Class name setting
-        tk.Label(controls_frame, text="Class name:", anchor="w").grid(row=1, column=0, padx=10, pady=10, sticky="w")
+        tk.Label(controls_frame, text="Class name:", anchor="w").grid(row=3, column=0, padx=10, pady=10, sticky="w")
         self.class_name_entry = tk.Entry(controls_frame, width=20)
         self.class_name_entry.insert(0, "0.2")
-        self.class_name_entry.grid(row=2, column=1, padx=10, pady=10)
+        self.class_name_entry.grid(row=3, column=1, padx=10, pady=10)
 
         # Status label
         self.status_label = tk.Label(controls_frame, text="Ready to start", fg="green")
@@ -74,6 +74,30 @@ class ConfigUI:
             width=15, height=2
         )
         self.send_button.grid(row=7, column=0, columnspan=3, pady=10)
+
+        # Input source setting
+        tk.Label(controls_frame, text="Input source:", anchor="w").grid(row=2, column=0, padx=10, pady=10, sticky="w")
+
+        self.input_source_var = tk.StringVar(value="realsense")
+
+        source_frame = tk.Frame(controls_frame)
+        source_frame.grid(row=2, column=1, padx=10, pady=10, sticky="w")
+
+        tk.Radiobutton(
+            source_frame,
+            text="RealSense",
+            variable=self.input_source_var,
+            value="realsense"
+        ).pack(side="left")
+
+        tk.Radiobutton(
+            source_frame,
+            text="Rosbag",
+            variable=self.input_source_var,
+            value="rosbag"
+        ).pack(side="left")
+
+        self.bag_path = "/home/wesley/Documents/Gaussian_Splatting_Research/rosbag"
 
         # Camera frame
         camera_frame = tk.Frame(root)
@@ -193,14 +217,18 @@ class ConfigUI:
             
             self.status_label.config(text="Starting subscriber...", fg="blue")
             self.root.update()
-                        
+            
+            source = self.input_source_var.get()
             # Start camera node (only if not already running)
             if not self.is_running(self.camera_process):
-                camera_cmd = ["ros2", "run", "realsense2_camera", "realsense2_camera_node", 
-                             "--ros-args", "-p", "enable_rgbd:=True", "-p", "enable_sync:=True",
-                             "-p", "align_depth.enable:=True", "-p", "enable_color:=True", 
-                             "-p", "enable_depth:=True", "-p", "enable_gyro:=True",
-                             "-p", "enable_accel:=True", "-r", "__node:=camera"]
+                if source == "realsense":
+                    camera_cmd = ["ros2", "run", "realsense2_camera", "realsense2_camera_node", 
+                                "--ros-args", "-p", "enable_rgbd:=True", "-p", "enable_sync:=True",
+                                "-p", "align_depth.enable:=True", "-p", "enable_color:=True", 
+                                "-p", "enable_depth:=True", "-p", "enable_gyro:=True",
+                                "-p", "enable_accel:=True", "-r", "__node:=camera"]
+                elif source == "rosbag":
+                    camera_cmd = ["ros2", "bag", "play", self.bag_path, "--loop"]   
                 
                 self.camera_process = subprocess.Popen(camera_cmd, start_new_session=True)
                 self.camera_active = True

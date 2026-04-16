@@ -12,3 +12,4 @@ camera_test/
 content/
 *.zip
 runs/
+rosbag/
