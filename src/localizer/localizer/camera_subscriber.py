@@ -12,8 +12,8 @@ from sensor_msgs.msg import Image
 from geometry_msgs.msg import PointStamped
 import sensor_msgs.msg as sensor_msgs
 import std_msgs.msg as std_msgs
-from ultralytics import YOLO
-
+from .sam3_wrapper import SAM3Wrapper
+import traceback
 import torch
 from . import pointcloud
 from . import marker
@@ -31,21 +31,31 @@ qos_profile = QoSProfile(
 
 class CameraSubscriber(Node):
     def __init__(self):
+        self.processing = False
+        self.frame_count = 0
         super().__init__("localizer_3D")
-
+        self.sam3 = SAM3Wrapper(default_prompt="chair", resolution=256)
+        self.current_prompt = "chair"
+        
         self.declare_parameter('confidence', 0.2)
         self.declare_parameter('num_points', 10000)
+        self.declare_parameter('sam3_run_every_n_frames', 4)
         
         self.confidence = self.get_parameter('confidence').get_parameter_value().double_value
         self.num_points = self.get_parameter('num_points').get_parameter_value().integer_value
+        self.sam3_run_every_n_frames = self.get_parameter('sam3_run_every_n_frames').get_parameter_value().integer_value
+        if self.sam3_run_every_n_frames < 1:
+            self.sam3_run_every_n_frames = 1
 
-        self.detection_model = YOLO("yolo11n.pt")
-        self.segmentation_model = YOLO("yolo11n-seg.pt")
         self.track_id = -1
         self.objects = []
         self.clicked_point = None
 
         self.position = [0,0,0]
+        self.last_mask = None
+        self.last_box = None
+        self.last_score = None
+        self.last_sam3_frame = 0
         
         self.bridge = cv_bridge.CvBridge()
 
@@ -114,6 +124,11 @@ class CameraSubscriber(Node):
             '/object_pose_marker',
             10
         )
+        self.get_logger().info(
+            f"CameraSubscriber initialized | prompt={self.current_prompt} | "
+            f"sam3_processor_resolution={self.sam3.resolution} | "
+            f"sam3_run_every_n_frames={self.sam3_run_every_n_frames}"
+        )
 
     def set_num_points(self, msg):
         self.num_points = msg.data
@@ -122,17 +137,15 @@ class CameraSubscriber(Node):
         self.track_id = msg.data
 
     def select_by_class_name(self, msg):
-        class_name = msg.data
-        if ('none' in class_name):
-            self.track_id = -1
-            return
+        prompt = msg.data.strip()
 
-        objects_of_class = [o for o in self.objects if o['class_name'] == class_name]
-
-        if len(objects_of_class) == 0:
-            self.track_id = -1
+        if prompt == "" or prompt.lower() == "none":
+            self.current_prompt = "chair"
         else:
-            self.track_id = sorted(objects_of_class, key=lambda o: o['confidence'])[0]['track_id']
+            self.current_prompt = prompt
+
+        self.sam3.set_prompt(self.current_prompt)
+        self.get_logger().info(f"SAM3 prompt set to: {self.current_prompt}")
     
     def clicked_point_callback(self, msg):
         self.clicked_point = (int(msg.point.x), int(msg.point.y))
@@ -236,126 +249,132 @@ class CameraSubscriber(Node):
         return points
     
     def rgbd_callback(self, msg):
-        image = self.bridge.imgmsg_to_cv2(msg.rgb, desired_encoding="rgb8")
-        color_img = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
-        detection_color_img = np.copy(color_img)
-        depth_img = self.bridge.imgmsg_to_cv2(msg.depth, desired_encoding="16UC1")
-        depth_img = (depth_img / 1000.0) * 2
-        original_h, original_w = color_img.shape[:2]
-
-        results = self.detection_model.track(
-            source=color_img,
-            tracker="bytetrack.yaml",
-            persist=True,
-            verbose=False,
-            conf=self.confidence
-        )
-
-        mask = None
-        is_valid = True
-        tracked_position = (0,0)
-
-        self.objects = []
-        parsed_results = []
-        
-        for result in results[0]:
-            result = json.loads(result.to_json())[0]
-            parsed_results.append(result)
-
-            box = result['box']
-            x = int((box['x1'] + box['x2']) / 2)
-            y = int((box['y1'] + box['y2']) / 2)
-
-            if "track_id" in result:        
-                track_id = result['track_id']
-            else:
-                track_id = -2
-
-            self.objects.append({'track_id': track_id, 'class_name': result['name'], 'confidence': result['confidence']})
-        
-        if self.clicked_point is not None:
-            click_x, click_y = self.clicked_point
-
-            candidates = []
-            for result in parsed_results:
-                box = result["box"]
-                if box["x1"] <= click_x <= box["x2"] and box["y1"] <= click_y <= box["y2"]:
-                    area = (box["x2"] - box["x1"]) * (box["y2"] - box["y1"])
-                    candidates.append((area, result))
-            if candidates:
-                candidates.sort(key=lambda t: t[0])  # smallest area first
-                best = candidates[0][1]
-                if "track_id" in best:
-                    self.track_id = best["track_id"]
-                else:
-                    self.track_id = -2
-                self.get_logger().info(
-                    f"Selected object: {best['name']} track_id={self.track_id} at ({click_x}, {click_y})"
-                )
-            else:
-                self.get_logger().info(f"No object found at clicked point ({click_x}, {click_y})")
-                self.track_id = -2
-            self.clicked_point = None
-
-        for result in parsed_results:
-            box = result['box']
-            x = int((box['x1'] + box['x2']) / 2)
-            y = int((box['y1'] + box['y2']) / 2)
-
-            if "track_id" in result:        
-                track_id = result['track_id']
-            else:
-                track_id = -2
-
-            if track_id != self.track_id:
-                cv2.circle(detection_color_img, (x, y), 10, (0, 255, 255), -1)
-                continue
-
-            tracked_position = (box['x1'], box['y1'])
-
-            cv2.circle(detection_color_img, (x, y), 10, (255, 0, 255), -1)
-            cv2.rectangle(detection_color_img, (int(box['x1']), int(box['y1'])), (int(box['x2']), int(box['y2'])), (255, 0, 255), 3)
-
-            cropped_img = color_img[int(box['y1']):int(box['y2']), int(box['x1']):int(box['x2'])]
-            segmentation_results = self.segmentation_model(cropped_img, verbose=False)[0]
-            
-
-            if segmentation_results.masks == None:
-                # FIXME: Figure out why this happens and fix if necessary
-                self.get_logger().warning("Segmentation resulted in no masks!")
-                is_valid = False
-                continue
-
-            indices = segmentation_results.boxes.data[:, 5]
-            
-            if (segmentation_results.masks.data == result['class']).any():
-                masked_img = segmentation_results.masks.data[torch.where(indices == result['class'])]
-            else:
-                masked_img = segmentation_results.masks.data
-            masked_img = torch.any(masked_img, dim=0).int() * 255
-            mask = masked_img.cpu().numpy().astype(np.uint8)
-            h, w = cropped_img.shape[:2]
-            mask = cv2.resize(mask, (w, h))
-            mask = mask > 0
-
-            depth_img = depth_img[int(box['y1']):int(box['y1'])+mask.shape[0], int(box['x1']):int(box['x1'])+mask.shape[1]] * mask
-            color_img = color_img[int(box['y1']):int(box['y1'])+mask.shape[0], int(box['x1']):int(box['x1'])+mask.shape[1]]
-            img_msg = self.bridge.cv2_to_imgmsg(cv2.cvtColor(255 - mask.astype(np.uint8) * 255, cv2.COLOR_GRAY2BGR))
-            self.mask_publisher.publish(img_msg)
-        
-        img_msg = self.bridge.cv2_to_imgmsg(detection_color_img, encoding="rgb8")
-        self.detection_publisher.publish(img_msg)
-
-        # self.get_logger().info(str(self.objects))
-
-        if not is_valid:
+        if self.processing:
+            self.get_logger().debug("Skipping frame because previous frame is still processing")
             return
 
-        num_points = self.num_points
-        points = self.create_pointcloud(color_img, depth_img, num_points, (original_w, original_h), tracked_position)
+        self.processing = True
+        self.frame_count += 1
+        self.get_logger().info(f"RGBD callback received, frame {self.frame_count}")
 
-        if len(points) > 0:
-            self.pointcloud_publisher.publish(pointcloud.create_pointcloud_msg(points, 'map'))
+        try:
+            self.get_logger().info(f"Frame {self.frame_count}: converting RGB image")
+            image = self.bridge.imgmsg_to_cv2(msg.rgb, desired_encoding="rgb8")
+            color_img = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+            detection_color_img = np.copy(color_img)
+
+            self.get_logger().info(f"Frame {self.frame_count}: converting depth image")
+            depth_img = self.bridge.imgmsg_to_cv2(msg.depth, desired_encoding="16UC1")
+            depth_img = (depth_img / 1000.0) * 2
+
+            original_h, original_w = color_img.shape[:2]
+            self.get_logger().info(
+                f"Frame {self.frame_count}: color_shape={color_img.shape}, "
+                f"depth_shape={depth_img.shape}, depth_nonzero={int(np.count_nonzero(depth_img))}"
+            )
+
+            run_sam3_this_frame = (self.frame_count % self.sam3_run_every_n_frames) == 0 or self.last_mask is None
+            if run_sam3_this_frame:
+                self.get_logger().info(f"Running SAM3 on frame {self.frame_count} with prompt '{self.current_prompt}'")
+                mask, box, score = self.sam3.best_mask(color_img, self.current_prompt)
+                self.last_mask = None if mask is None else mask.copy()
+                self.last_box = None if box is None else box.copy()
+                self.last_score = score
+                self.last_sam3_frame = self.frame_count
+                self.get_logger().info(
+                    f"SAM3 done on frame {self.frame_count}: mask_found={mask is not None}, score={score}"
+                )
+            else:
+                mask = None if self.last_mask is None else self.last_mask.copy()
+                box = None if self.last_box is None else self.last_box.copy()
+                score = self.last_score
+                self.get_logger().info(
+                    f"Frame {self.frame_count}: skipping SAM3, reusing result from frame {self.last_sam3_frame}"
+                )
+
+            if mask is None:
+                self.get_logger().warn(f"No SAM3 mask found for prompt: {self.current_prompt}")
+                img_msg = self.bridge.cv2_to_imgmsg(detection_color_img, encoding="bgr8")
+                self.detection_publisher.publish(img_msg)
+                return
+
+            if mask.shape[:2] != depth_img.shape[:2]:
+                self.get_logger().warn(
+                    f"Frame {self.frame_count}: mask/depth mismatch mask_shape={mask.shape} "
+                    f"depth_shape={depth_img.shape}, resizing mask"
+                )
+                mask = cv2.resize(
+                    mask.astype(np.uint8),
+                    (depth_img.shape[1], depth_img.shape[0]),
+                    interpolation=cv2.INTER_NEAREST
+                )
+
+            self.get_logger().info(
+                f"Frame {self.frame_count}: mask_shape={mask.shape}, mask_nonzero={int(np.count_nonzero(mask))}"
+            )
+            mask_vis = (mask * 255).astype(np.uint8)
+            mask_msg = self.bridge.cv2_to_imgmsg(mask_vis, encoding="mono8")
+            self.mask_publisher.publish(mask_msg)
+
+            detection_color_img[mask == 1] = (
+                0.6 * detection_color_img[mask == 1] + 0.4 * np.array([0, 255, 0])
+            ).astype(np.uint8)
+
+            tracked_position = (0, 0)
+
+            if box is not None:
+                x1, y1, x2, y2 = [int(v) for v in box]
+                self.get_logger().info(
+                    f"Frame {self.frame_count}: box=({x1},{y1},{x2},{y2}), score={score}"
+                )
+                cv2.rectangle(detection_color_img, (x1, y1), (x2, y2), (255, 0, 255), 3)
+                cv2.putText(
+                    detection_color_img,
+                    f"{self.current_prompt}: {score:.2f}" if score is not None else self.current_prompt,
+                    (x1, max(20, y1 - 10)),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    (255, 0, 255),
+                    2,
+                )
+                tracked_position = (x1, y1)
+
+            img_msg = self.bridge.cv2_to_imgmsg(detection_color_img, encoding="bgr8")
+            self.detection_publisher.publish(img_msg)
+
+            masked_depth = depth_img.copy()
+            masked_depth[mask == 0] = 0
+            self.get_logger().info(
+                f"Frame {self.frame_count}: masked_depth_nonzero={int(np.count_nonzero(masked_depth))}"
+            )
+
+            points = self.create_pointcloud(
+                color_img,
+                masked_depth,
+                self.num_points,
+                (original_w, original_h),
+                tracked_position,
+            )
+            self.get_logger().info(
+                f"Frame {self.frame_count}: generated_pointcloud_points={len(points)}"
+            )
+
+            if len(points) > 0:
+                self.pointcloud_publisher.publish(
+                    pointcloud.create_pointcloud_msg(points, 'map')
+                )
+                self.get_logger().info(f"Frame {self.frame_count}: pointcloud published")
+            else:
+                self.get_logger().warn(f"Frame {self.frame_count}: no points generated from mask")
+
+        except Exception as e:
+            self.get_logger().error(f"rgbd_callback failed on frame {self.frame_count}: {repr(e)}")
+            tb = traceback.format_exc()
+            for line in tb.splitlines():
+                self.get_logger().error(line)
+        finally:
+            self.get_logger().info(f"Frame {self.frame_count}: processing complete")
+            self.processing = False
 
 def main(args=None):
     try:

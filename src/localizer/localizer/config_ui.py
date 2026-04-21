@@ -37,7 +37,7 @@ class ConfigUI:
         # Class name setting
         tk.Label(controls_frame, text="Class name:", anchor="w").grid(row=3, column=0, padx=10, pady=10, sticky="w")
         self.class_name_entry = tk.Entry(controls_frame, width=20)
-        self.class_name_entry.insert(0, "0.2")
+        self.class_name_entry.insert(0, "chair")
         self.class_name_entry.grid(row=3, column=1, padx=10, pady=10)
 
         # Status label
@@ -123,10 +123,26 @@ class ConfigUI:
     
     def send_config(self):
         num_points = int(self.num_points_entry.get())
-        subscriber_cmd = ["ros2", "topic", "pub", "--once", 
-                             "/config/num_points", "std_msgs/msg/Int32", "{data: "+f"{num_points}"+"}"]
-            
-        subprocess.Popen(subscriber_cmd, start_new_session=True)
+        prompt = self.class_name_entry.get().strip()
+
+        subprocess.Popen(
+            [
+                "ros2", "topic", "pub", "--once",
+                "/config/num_points", "std_msgs/msg/Int32",
+                "{data: " + f"{num_points}" + "}"
+            ],
+            start_new_session=True
+        )
+
+        if prompt:
+            subprocess.Popen(
+                [
+                    "ros2", "topic", "pub", "--once",
+                    "/select_by_class_name", "std_msgs/msg/String",
+                    "{data: '" + prompt + "'}"
+                ],
+                start_new_session=True
+            )
     
     def kill_process(self, process):
         if process is None:
