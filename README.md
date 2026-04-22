@@ -37,7 +37,6 @@ The pipeline is designed to support:
 	<li>[ROS2 Humble](https://docs.ros.org/en/humble/Installation.html) A LTS ROS2 Distribution for Ubuntu Jammy (22.04).</li>
 	<li>
 	Install [PyTorch](https://pytorch.org/get-started/locally/). If you are using a Jetson Orin Nano either install PyTorch using NVIDIA's guides or install the following wheels:
-	<li>SAM3 model (https://github.com/facebookresearch/sam3)</li>
 
 ```sh
 	pip install https://pypi.jetson-ai-lab.io/jp6/cu126/+f/62a/1beee9f2f1470/torch-2.8.0-cp310-cp310-linux_aarch64.whl#sha256=62a1beee9f2f147076a974d2942c90060c12771c94740830327cae705b2595fc
@@ -50,6 +49,7 @@ Install torchvision:
 ```
 
 </li>
+	<li>SAM3 model (https://github.com/facebookresearch/sam3)</li>
 	<li>[realsense-ros](https://github.com/realsenseai/realsense-ros) A ROS wrapper for Intel® RealSense™ cameras.</li>
 </li>
 </ol>
