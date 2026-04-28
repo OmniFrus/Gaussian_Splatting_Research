@@ -53,6 +53,15 @@ class CameraSubscriber(Node):
             "keyboard": (0, 255, 255)
         }
 
+        self.class_to_id = {
+            "background": 0,
+            "chair": 1,
+            "table": 2,
+            "person": 3,
+            "monitor": 4,
+            "keyboard": 5,
+        }
+
         self.declare_parameter('confidence', 0.2)
         self.declare_parameter('num_points', 10000)
         self.declare_parameter('sam3_run_every_n_frames', 1)
@@ -81,6 +90,8 @@ class CameraSubscriber(Node):
         self.last_score = None
         self.last_labels = None
         self.last_overlay = None
+        self.last_semantic_map = None
+        self.last_semantic_map_color = None
         self.last_sam3_frame = 0
         
         self.bridge = cv_bridge.CvBridge()
@@ -150,6 +161,19 @@ class CameraSubscriber(Node):
             '/object_pose_marker',
             10
         )
+
+        self.semantic_map_publisher = self.create_publisher(
+            Image,
+            "/semantic_map",
+            10
+        )
+
+        self.semantic_map_color_publisher = self.create_publisher(
+            Image,
+            "/semantic_map_color",
+            10
+        )
+
         self.get_logger().info(
             f"CameraSubscriber initialized | prompt={self.current_prompt} | "
             f"sam3_processor_resolution={self.sam3.resolution} | "
@@ -320,7 +344,9 @@ class CameraSubscriber(Node):
 
                 semantic_mask = None
                 semantic_overlay = np.zeros_like(detection_color_img, dtype=np.uint8)
-
+                semantic_map = np.zeros(depth_img.shape[:2], dtype=np.uint8)
+                semantic_map_color = np.zeros_like(detection_color_img, dtype=np.uint8)
+                
                 all_boxes = []
                 all_scores = []
                 all_labels = []
@@ -352,7 +378,21 @@ class CameraSubscriber(Node):
 
                     semantic_mask = np.logical_or(semantic_mask, class_mask).astype(np.uint8)
 
+                    class_id = self.class_to_id.get(class_name, 255)
                     color = self.class_colors.get(class_name, (255, 255, 255))
+
+                    if class_mask.shape[:2] != semantic_map.shape[:2]:
+                        class_mask_resized = cv2.resize(
+                            class_mask.astype(np.uint8),
+                            (semantic_map.shape[1], semantic_map.shape[0]),
+                            interpolation=cv2.INTER_NEAREST
+                        )
+                    else:
+                        class_mask_resized = class_mask
+
+                    semantic_map[class_mask_resized == 1] = class_id
+                    semantic_map_color[class_mask_resized == 1] = color
+
                     semantic_overlay[class_mask == 1] = color
 
                     for i, b in enumerate(boxes):
@@ -377,6 +417,8 @@ class CameraSubscriber(Node):
                 self.last_score = None if score is None else list(score)
                 self.last_labels = None if labels is None else list(labels)
                 self.last_overlay = semantic_overlay.copy()
+                self.last_semantic_map = semantic_map.copy()
+                self.last_semantic_map_color = semantic_map_color.copy()
                 self.last_sam3_frame = self.frame_count
 
                 self.get_logger().info(
@@ -392,7 +434,9 @@ class CameraSubscriber(Node):
                 score = self.last_score
                 labels = getattr(self, "last_labels", None)
                 semantic_overlay = getattr(self, "last_overlay", np.zeros_like(detection_color_img, dtype=np.uint8))
-
+                semantic_map = getattr(self, "last_semantic_map", np.zeros(depth_img.shape[:2], dtype=np.uint8))
+                semantic_map_color = getattr(self, "last_semantic_map_color", np.zeros_like(detection_color_img, dtype=np.uint8))
+                
                 self.get_logger().info(
                     f"Frame {self.frame_count}: skipping SAM3, reusing result from frame {self.last_sam3_frame}"
                 )
@@ -420,6 +464,12 @@ class CameraSubscriber(Node):
             mask_vis = (mask * 255).astype(np.uint8)
             mask_msg = self.bridge.cv2_to_imgmsg(mask_vis, encoding="mono8")
             self.mask_publisher.publish(mask_msg)
+
+            semantic_msg = self.bridge.cv2_to_imgmsg(semantic_map, encoding="mono8")
+            self.semantic_map_publisher.publish(semantic_msg)
+
+            semantic_color_msg = self.bridge.cv2_to_imgmsg(semantic_map_color, encoding="bgr8")
+            self.semantic_map_color_publisher.publish(semantic_color_msg)
 
             alpha = 0.45
             colored_pixels = mask == 1
