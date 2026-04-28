@@ -3,8 +3,11 @@
 [**Wesley Haverkort**](mailto:w.j.haverkort@student.rug.nl)
 </div>
 
-## Sync slides
+## My slides
 [https://docs.google.com/presentation/d/1ioU0Bz3pH50mXnqPpxjEqHX3ZRrUq6BBKUTdcfEVIbw/edit?usp=drive_link](https://docs.google.com/presentation/d/1jmmtQW7J8PL43zMLR3hJySDBDvEeZ5zam7DdNb1mGiw/edit?slide=id.g3e5fd4c6abe_1_0#slide=id.g3e5fd4c6abe_1_0)
+
+## Weekly Sync Slides
+[https://docs.google.com/presentation/d/1NKJ7fA-q3cYdW05NNqbInGAht0XvYVoJxhGapSL4USc/edit?slide=id.g3d918da5dca_9_0#slide=id.g3d918da5dca_9_0]
 
 ## Progress
 Last updated: Jan 30 2026
