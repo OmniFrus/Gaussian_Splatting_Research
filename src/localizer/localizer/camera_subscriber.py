@@ -34,18 +34,42 @@ class CameraSubscriber(Node):
         self.processing = False
         self.frame_count = 0
         super().__init__("localizer_3D")
-        self.sam3 = SAM3Wrapper(default_prompt="chair", resolution=256)
-        self.current_prompt = "chair"
-        
+        self.sam3 = SAM3Wrapper(default_prompt="", resolution=1008)
+        self.current_prompt = "" 
+        self.default_classes = [
+            "chair",
+            "table",
+            "person",
+            "monitor",
+            "keyboard"
+        ]
+
+        # BGR colors for OpenCV
+        self.class_colors = {
+            "chair": (0, 255, 0),        
+            "table": (255, 0, 0),        
+            "person": (0, 0, 255),       
+            "monitor": (255, 0, 255),    
+            "keyboard": (0, 255, 255)
+        }
+
         self.declare_parameter('confidence', 0.2)
         self.declare_parameter('num_points', 10000)
-        self.declare_parameter('sam3_run_every_n_frames', 4)
+        self.declare_parameter('sam3_run_every_n_frames', 1)
         
         self.confidence = self.get_parameter('confidence').get_parameter_value().double_value
         self.num_points = self.get_parameter('num_points').get_parameter_value().integer_value
         self.sam3_run_every_n_frames = self.get_parameter('sam3_run_every_n_frames').get_parameter_value().integer_value
-        if self.sam3_run_every_n_frames < 1:
-            self.sam3_run_every_n_frames = 1
+
+        self.declare_parameter("prompt", "")
+        self.current_prompt = self.get_parameter("prompt").get_parameter_value().string_value
+
+        if self.current_prompt.strip() == "":
+            self.get_logger().info(
+                f"SAM3 prompt empty: using default classes {self.default_classes}"
+            )
+        else:
+            self.sam3.set_prompt(self.current_prompt)
 
         self.track_id = -1
         self.objects = []
@@ -55,6 +79,8 @@ class CameraSubscriber(Node):
         self.last_mask = None
         self.last_box = None
         self.last_score = None
+        self.last_labels = None
+        self.last_overlay = None
         self.last_sam3_frame = 0
         
         self.bridge = cv_bridge.CvBridge()
@@ -139,13 +165,16 @@ class CameraSubscriber(Node):
     def select_by_class_name(self, msg):
         prompt = msg.data.strip()
 
-        if prompt == "" or prompt.lower() == "none":
-            self.current_prompt = "chair"
-        else:
-            self.current_prompt = prompt
+        # Empty prompt means: run default class list
+        self.current_prompt = prompt
 
-        self.sam3.set_prompt(self.current_prompt)
-        self.get_logger().info(f"SAM3 prompt set to: {self.current_prompt}")
+        if self.current_prompt == "":
+            self.get_logger().info(
+                f"SAM3 prompt empty: using default classes {self.default_classes}"
+            )
+        else:
+            self.sam3.set_prompt(self.current_prompt)
+            self.get_logger().info(f"SAM3 prompt set to: {self.current_prompt}")
     
     def clicked_point_callback(self, msg):
         self.clicked_point = (int(msg.point.x), int(msg.point.y))
@@ -273,21 +302,97 @@ class CameraSubscriber(Node):
                 f"depth_shape={depth_img.shape}, depth_nonzero={int(np.count_nonzero(depth_img))}"
             )
 
-            run_sam3_this_frame = (self.frame_count % self.sam3_run_every_n_frames) == 0 or self.last_mask is None
+            run_sam3_this_frame = (
+                self.frame_count % self.sam3_run_every_n_frames
+            ) == 0 or self.last_mask is None
+
             if run_sam3_this_frame:
-                self.get_logger().info(f"Running SAM3 on frame {self.frame_count} with prompt '{self.current_prompt}'")
-                mask, box, score = self.sam3.best_mask(color_img, self.current_prompt)
+                if self.current_prompt.strip() == "":
+                    prompts = self.default_classes
+                    self.get_logger().info(
+                        f"Running SAM3 full-scene mode with classes: {prompts}"
+                    )
+                else:
+                    prompts = [self.current_prompt]
+                    self.get_logger().info(
+                        f"Running SAM3 single-class mode with prompt: {self.current_prompt}"
+                    )
+
+                semantic_mask = None
+                semantic_overlay = np.zeros_like(detection_color_img, dtype=np.uint8)
+
+                all_boxes = []
+                all_scores = []
+                all_labels = []
+
+                for class_name in prompts:
+                    self.get_logger().info(
+                        f"Frame {self.frame_count}: running SAM3 for class '{class_name}'"
+                    )
+
+                    masks, boxes, scores = self.sam3.all_masks(
+                        color_img,
+                        class_name,
+                        score_threshold=0.3
+                    )
+
+                    if len(masks) == 0:
+                        self.get_logger().info(
+                            f"Frame {self.frame_count}: no masks found for '{class_name}'"
+                        )
+                        continue
+
+                    class_mask = np.zeros_like(masks[0], dtype=np.uint8)
+
+                    for m in masks:
+                        class_mask = np.logical_or(class_mask, m).astype(np.uint8)
+
+                    if semantic_mask is None:
+                        semantic_mask = np.zeros_like(class_mask, dtype=np.uint8)
+
+                    semantic_mask = np.logical_or(semantic_mask, class_mask).astype(np.uint8)
+
+                    color = self.class_colors.get(class_name, (255, 255, 255))
+                    semantic_overlay[class_mask == 1] = color
+
+                    for i, b in enumerate(boxes):
+                        if b is None:
+                            continue
+
+                        s = None
+                        if scores is not None and len(scores) > i:
+                            s = scores[i]
+
+                        all_boxes.append(b)
+                        all_scores.append(s)
+                        all_labels.append(class_name)
+
+                mask = semantic_mask
+                box = all_boxes
+                score = all_scores
+                labels = all_labels
+
                 self.last_mask = None if mask is None else mask.copy()
-                self.last_box = None if box is None else box.copy()
-                self.last_score = score
+                self.last_box = None if box is None else [None if b is None else b.copy() for b in box]
+                self.last_score = None if score is None else list(score)
+                self.last_labels = None if labels is None else list(labels)
+                self.last_overlay = semantic_overlay.copy()
                 self.last_sam3_frame = self.frame_count
+
                 self.get_logger().info(
-                    f"SAM3 done on frame {self.frame_count}: mask_found={mask is not None}, score={score}"
+                    f"SAM3 done on frame {self.frame_count}: "
+                    f"mask_found={mask is not None}, "
+                    f"instances_found={len(all_boxes)}, "
+                    f"classes_found={list(set(all_labels))}"
                 )
+
             else:
                 mask = None if self.last_mask is None else self.last_mask.copy()
-                box = None if self.last_box is None else self.last_box.copy()
+                box = None if self.last_box is None else [None if b is None else b.copy() for b in self.last_box]
                 score = self.last_score
+                labels = getattr(self, "last_labels", None)
+                semantic_overlay = getattr(self, "last_overlay", np.zeros_like(detection_color_img, dtype=np.uint8))
+
                 self.get_logger().info(
                     f"Frame {self.frame_count}: skipping SAM3, reusing result from frame {self.last_sam3_frame}"
                 )
@@ -316,28 +421,49 @@ class CameraSubscriber(Node):
             mask_msg = self.bridge.cv2_to_imgmsg(mask_vis, encoding="mono8")
             self.mask_publisher.publish(mask_msg)
 
-            detection_color_img[mask == 1] = (
-                0.6 * detection_color_img[mask == 1] + 0.4 * np.array([0, 255, 0])
+            alpha = 0.45
+            colored_pixels = mask == 1
+
+            detection_color_img[colored_pixels] = (
+                (1 - alpha) * detection_color_img[colored_pixels]
+                + alpha * semantic_overlay[colored_pixels]
             ).astype(np.uint8)
 
             tracked_position = (0, 0)
 
-            if box is not None:
-                x1, y1, x2, y2 = [int(v) for v in box]
-                self.get_logger().info(
-                    f"Frame {self.frame_count}: box=({x1},{y1},{x2},{y2}), score={score}"
-                )
-                cv2.rectangle(detection_color_img, (x1, y1), (x2, y2), (255, 0, 255), 3)
-                cv2.putText(
-                    detection_color_img,
-                    f"{self.current_prompt}: {score:.2f}" if score is not None else self.current_prompt,
-                    (x1, max(20, y1 - 10)),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (255, 0, 255),
-                    2,
-                )
-                tracked_position = (x1, y1)
+            if box is not None and len(box) > 0:
+                for i, b in enumerate(box):
+                    if b is None:
+                        continue
+
+                    x1, y1, x2, y2 = [int(v) for v in b]
+
+                    s = None
+                    if score is not None and len(score) > i:
+                        s = score[i]
+
+                    label = self.current_prompt
+                    if "labels" in locals() and labels is not None and len(labels) > i:
+                        label = labels[i]
+
+                    color = self.class_colors.get(label, (255, 255, 255))
+
+                    cv2.rectangle(detection_color_img, (x1, y1), (x2, y2), color, 2)
+
+                    text = f"{label}: {s:.2f}" if s is not None else label
+                    cv2.putText(
+                        detection_color_img,
+                        text,
+                        (x1, max(20, y1 - 10)),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        color,
+                        2,
+                    )
+
+                first_box = box[0]
+                if first_box is not None:
+                    tracked_position = (int(first_box[0]), int(first_box[1]))
 
             img_msg = self.bridge.cv2_to_imgmsg(detection_color_img, encoding="bgr8")
             self.detection_publisher.publish(img_msg)

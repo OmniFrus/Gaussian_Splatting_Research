@@ -12,7 +12,7 @@ from sam3.model.sam3_image_processor import Sam3Processor
 
 
 class SAM3Wrapper:
-    def __init__(self, default_prompt: str = "chair", resolution: int = 256):
+    def __init__(self, default_prompt: str = "", resolution: int = 1008):
         self.default_prompt = default_prompt
         self.requested_resolution = resolution
         self.resolution = resolution
@@ -33,8 +33,7 @@ class SAM3Wrapper:
         )
         if self.resolution != self.model_expected_resolution:
             self.logger.warning(
-                "SAM3 processor resolution is %d, but current SAM3 backbone is built around %d. "
-                "If you hit RoPE assertion errors, this is likely the cause.",
+                "SAM3 processor resolution is %d, but current SAM3 backbone is built around %d. ",
                 self.resolution,
                 self.model_expected_resolution,
             )
@@ -111,35 +110,40 @@ class SAM3Wrapper:
         )
         return masks, boxes, scores
 
-    def best_mask(self, image_bgr: np.ndarray, prompt: str = None):
+    def all_masks(self, image_bgr: np.ndarray, prompt: str = None, score_threshold: float = 0.0):
         masks, boxes, scores = self.predict(image_bgr, prompt)
 
         if masks is None or len(masks) == 0:
-            self.logger.info("SAM3 best_mask: no masks returned")
-            return None, None, None
+            self.logger.info("SAM3 all_masks: no masks returned")
+            return [], [], []
 
-        if scores is None or len(scores) == 0:
-            idx = 0
-        else:
-            idx = int(torch.argmax(scores).item())
+        out_masks = []
+        out_boxes = []
+        out_scores = []
 
-        mask = masks[idx].detach().cpu().numpy()
-        mask = np.squeeze(mask)
-        mask = (mask > 0).astype(np.uint8)
+        for i in range(len(masks)):
+            score = None
+            if scores is not None and len(scores) > i:
+                score = float(scores[i].detach().cpu().item())
 
-        box = None
-        if boxes is not None and len(boxes) > idx:
-            box = boxes[idx].detach().cpu().numpy()
+            if score is not None and score < score_threshold:
+                continue
 
-        score = None
-        if scores is not None and len(scores) > idx:
-            score = float(scores[idx].detach().cpu().item())
+            mask = masks[i].detach().cpu().numpy()
+            mask = np.squeeze(mask)
+            mask = (mask > 0).astype(np.uint8)
+
+            box = None
+            if boxes is not None and len(boxes) > i:
+                box = boxes[i].detach().cpu().numpy()
+
+            out_masks.append(mask)
+            out_boxes.append(box)
+            out_scores.append(score)
 
         self.logger.info(
-            "SAM3 best_mask selected | idx=%d | score=%s | mask_shape=%s | box=%s",
-            idx,
-            "None" if score is None else f"{score:.4f}",
-            tuple(mask.shape),
-            None if box is None else box.tolist(),
+            "SAM3 all_masks selected | count=%d | scores=%s",
+            len(out_masks),
+            out_scores,
         )
-        return mask, box, score
+        return out_masks, out_boxes, out_scores

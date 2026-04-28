@@ -218,6 +218,7 @@ class ConfigUI:
         try:
             num_points = int(self.num_points_entry.get())
             confidence = float(self.confidence_entry.get())
+            prompt = self.class_name_entry.get().strip()
             
             if num_points < 1:
                 self.status_label.config(text="Error: Points must be >= 1", fg="red")
@@ -254,6 +255,9 @@ class ConfigUI:
                              "--ros-args", "-p", f"num_points:={num_points}",
                              "-p", f"confidence:={confidence}"]
             
+            if prompt != "":
+                subscriber_cmd += ["-p", f"prompt:={prompt}"]
+                
             self.subscriber_process = subprocess.Popen(subscriber_cmd, start_new_session=True)
             
             self.status_label.config(text="Subscriber started!", fg="green")
@@ -270,6 +274,7 @@ class ConfigUI:
         try:
             num_points = int(self.num_points_entry.get())
             confidence = float(self.confidence_entry.get())
+            prompt = self.class_name_entry.get().strip()
             
             if num_points < 1:
                 self.status_label.config(text="Error: Points must be >= 1", fg="red")
@@ -288,8 +293,12 @@ class ConfigUI:
             
             # Start subscriber node with new parameters
             subscriber_cmd = ["ros2", "run", "localizer", "save_images", 
-                             "--ros-args", "-p", f"num_points:={num_points}",
+                             "--ros-args",
+                             "-p", f"num_points:={num_points}",
                              "-p", f"confidence:={confidence}"]
+            
+            if prompt != "":
+                subscriber_cmd += ["-p", f"prompt:={prompt}"]
             
             self.subscriber_process = subprocess.Popen(subscriber_cmd, start_new_session=True)
             
