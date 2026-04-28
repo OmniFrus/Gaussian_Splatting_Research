@@ -9,7 +9,7 @@
 ## Progress
 Last updated: Jan 30 2026
 
-- [ ] Replace object-centric pipeline with full-image semantic segmentation (SegFormer).
+- [ ] Replace object-centric pipeline with full-image semantic segmentation (Sam3).
 - [ ] Publish semantic segmentation outputs (`/semantic_image`).
 - [ ] Extend pipeline to generate semantic point clouds.
 - [ ] Integrate depth data for 3D semantic reconstruction.
@@ -49,6 +49,7 @@ Install torchvision:
 ```
 
 </li>
+	<li>SAM3 model (https://github.com/facebookresearch/sam3)</li>
 	<li>[realsense-ros](https://github.com/realsenseai/realsense-ros) A ROS wrapper for Intel® RealSense™ cameras.</li>
 </li>
 </ol>
@@ -63,7 +64,9 @@ source install/setup.bash
 ros2 run localizer config_ui
 ```
 
-Setup your parameters and click start. Click somewhere on the image to start tracking that object (It can only track things that are trained in YOLO).
+Setup your parameters and click start. 
+Enter a prompt (e.g., "chair") to segment objects using SAM3. 
+The system will generate masks for matching regions in the image.
 
 ## Remote viewing
 To remotely view your screen use nomachine by starting the `nxserver` service and connecting to it using the nomachine app on your mobile device.
