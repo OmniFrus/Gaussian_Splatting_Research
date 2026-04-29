@@ -62,7 +62,8 @@ Install torchvision:
 Run the following in the working directory:
 ```sh
 source /opt/ros/humble/setup.bash
-colcon build --packages-select localizer
+colcon build --packages-select localizer --symlink-install
+export PYTHONPATH=/home/wesley/Documents/sam3-main:$PYTHONPATH
 source install/setup.bash
 ros2 run localizer config_ui
 ```
