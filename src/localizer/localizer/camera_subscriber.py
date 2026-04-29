@@ -17,6 +17,8 @@ import traceback
 import torch
 from . import pointcloud
 from . import marker
+import time
+from .timing_logger import TimingLogger
 
 # import marker
 from visualization_msgs.msg import Marker
@@ -31,6 +33,7 @@ qos_profile = QoSProfile(
 
 class CameraSubscriber(Node):
     def __init__(self):
+        self.timing_logger = TimingLogger()
         self.processing = False
         self.frame_count = 0
         super().__init__("localizer_3D")
@@ -231,14 +234,14 @@ class CameraSubscriber(Node):
         return (centroid, quaternion)
 
 
-    def create_pointcloud(self, color_img, depth_img, num_points, original_img_size, offset):
+    def create_pointcloud(self, color_img, depth_img, semantic_map, num_points, original_img_size, offset):
         h, w = depth_img.shape[:2]
         granularity = int(np.sqrt((w*h)/num_points))
         if granularity < 1: granularity = 1
 
         num_points = min(num_points, np.count_nonzero(depth_img))
 
-        points = np.zeros((num_points, 6))
+        points = np.zeros((num_points, 7))
         i = 0
         for x in range(0, w, granularity):
             for y in range(0, h, granularity):
@@ -247,7 +250,9 @@ class CameraSubscriber(Node):
                 x_pos = (((float(x)+offset[0])/original_img_size[0]) - 0.5)* depth
                 y_pos = -(((float(y)+offset[1])/original_img_size[1]) - 0.5) * original_img_size[1]/original_img_size[0] * depth
                 color = color_img[y][x]
-                points[i] = [x_pos, depth, y_pos, *color]
+                semantic_id = semantic_map[y][x]
+                points[i] = [x_pos, depth, y_pos, int(color[0]), int(color[1]), int(color[2]), int(semantic_id)]
+                
                 i += 1
                 if i == num_points:
                     break
@@ -255,7 +260,7 @@ class CameraSubscriber(Node):
                 continue
             break
 
-        points.resize((i, 6))
+        points.resize((i, 7))
         return points
 
     def create_pointcloud_adaptive(self, color_img, depth_img, semantic_map, num_points, original_img_size, offset):
@@ -330,6 +335,7 @@ class CameraSubscriber(Node):
                         f"Running SAM3 single-class mode with prompt: {self.current_prompt}"
                     )
 
+                frame_start_time = time.perf_counter()
                 semantic_mask = None
                 semantic_overlay = np.zeros_like(detection_color_img, dtype=np.uint8)
                 semantic_map = np.zeros(depth_img.shape[:2], dtype=np.uint8)
@@ -344,10 +350,28 @@ class CameraSubscriber(Node):
                         f"Frame {self.frame_count}: running SAM3 for class '{class_name}'"
                     )
 
+                    class_start_time = time.perf_counter()
+
                     masks, boxes, scores = self.sam3.all_masks(
                         color_img,
                         class_name,
                         score_threshold=0.3
+                    )
+
+                    class_elapsed = time.perf_counter() - class_start_time
+
+                    self.timing_logger.log(
+                        frame=self.frame_count,
+                        class_name=class_name,
+                        stage="sam3_class",
+                        elapsed_seconds=class_elapsed,
+                        num_masks=len(masks),
+                        num_points=0
+                    )
+
+                    self.get_logger().info(
+                        f"TIMING frame={self.frame_count}, class={class_name}, "
+                        f"sam3_time={class_elapsed:.2f}s, masks={len(masks)}"
                     )
 
                     if len(masks) == 0:
@@ -394,6 +418,21 @@ class CameraSubscriber(Node):
                         all_boxes.append(b)
                         all_scores.append(s)
                         all_labels.append(class_name)
+
+                frame_elapsed = time.perf_counter() - frame_start_time
+
+                self.timing_logger.log(
+                    frame=self.frame_count,
+                    class_name="ALL",
+                    stage="sam3_full_frame",
+                    elapsed_seconds=frame_elapsed,
+                    num_masks=len(all_boxes),
+                    num_points=0
+                )
+
+                self.get_logger().info(
+                    f"TIMING frame={self.frame_count}, full_sam3_time={frame_elapsed:.2f}s"
+                )
 
                 mask = semantic_mask
                 box = all_boxes
@@ -511,7 +550,9 @@ class CameraSubscriber(Node):
                 f"Frame {self.frame_count}: masked_depth_nonzero={int(np.count_nonzero(masked_depth))}"
             )
 
-            points = self.create_pointcloud_adaptive(
+            pc_start = time.perf_counter()
+
+            points = self.create_pointcloud(
                 semantic_map_color,
                 masked_depth,
                 semantic_map,
@@ -519,8 +560,24 @@ class CameraSubscriber(Node):
                 (original_w, original_h),
                 tracked_position,
             )
+
+            pc_elapsed = time.perf_counter() - pc_start
+
             self.get_logger().info(
                 f"Frame {self.frame_count}: generated_pointcloud_points={len(points)}"
+            )
+
+            self.timing_logger.log(
+                frame=self.frame_count,
+                class_name="ALL",
+                stage="pointcloud_generation",
+                elapsed_seconds=pc_elapsed,
+                num_masks=0,
+                num_points=len(points)
+            )
+
+            self.get_logger().info(
+                f"TIMING frame={self.frame_count}, pointcloud_time={pc_elapsed:.4f}s"
             )
 
             if len(points) > 0:

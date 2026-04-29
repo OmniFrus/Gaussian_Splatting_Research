@@ -1,0 +1,11 @@
+frame,class_name,stage,elapsed_seconds,num_masks,num_points
+1,chair,sam3_class,41.3287,2,0
+1,table,sam3_class,37.6871,1,0
+1,person,sam3_class,38.0671,1,0
+1,monitor,sam3_class,38.3734,0,0
+1,keyboard,sam3_class,38.1659,1,0
+1,mouse,sam3_class,38.5768,1,0
+1,floor,sam3_class,39.3916,1,0
+1,wall,sam3_class,39.3473,2,0
+1,ALL,sam3_full_frame,311.0405,9,0
+1,ALL,pointcloud_generation,0.0187,0,4943
