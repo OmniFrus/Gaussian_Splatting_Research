@@ -29,10 +29,10 @@ def create_pointcloud_msg(points, parent_frame):
 
     data = b''
     for i in range(points.shape[0]):
-        data += positions[i * 3 * item_size:(i + 1) * 3 * item_size]
-        data += colors[i * 3:(i + 1) * 3]
+        data += positions[i*3*item_size:(i+1)*3*item_size]
+        data += colors[i*3:(i+1)*3]
         data += b'\x00'
-        data += semantic_ids[i * item_size:(i + 1) * item_size]
+        data += semantic_ids[i*item_size:(i+1)*item_size]
 
     return sensor_msgs.PointCloud2(
         header=header,
@@ -42,6 +42,6 @@ def create_pointcloud_msg(points, parent_frame):
         is_bigendian=False,
         fields=fields,
         point_step=5 * item_size,
-        row_step=5 * item_size * points.shape[0],
+        row_step=5* item_size * points.shape[0],
         data=data,
     )
