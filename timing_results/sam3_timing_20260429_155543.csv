@@ -1,0 +1,15 @@
+frame,class_name,stage,elapsed_seconds,num_masks,num_points
+1,chair,sam3_class,5.3425,0,0
+1,ALL,sam3_full_frame,50.8532,0,0
+2,chair,sam3_class,4.4983,0,0
+2,ALL,sam3_full_frame,52.2914,0,0
+3,chair,sam3_class,4.8702,0,0
+3,ALL,sam3_full_frame,59.5491,0,0
+4,chair,sam3_class,11.3213,0,0
+4,ALL,sam3_full_frame,67.0887,0,0
+5,chair,sam3_class,12.2426,0,0
+5,ALL,sam3_full_frame,71.7196,0,0
+6,chair,sam3_class,5.5342,0,0
+6,ALL,sam3_full_frame,51.6965,0,0
+7,chair,sam3_class,5.6778,0,0
+7,ALL,sam3_full_frame,49.9546,0,0

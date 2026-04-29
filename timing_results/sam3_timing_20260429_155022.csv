@@ -1,0 +1,4 @@
+frame,class_name,stage,elapsed_seconds,num_masks,num_points
+1,wall,sam3_class,3.6286,1,0
+1,ALL,sam3_full_frame,34.905,1,0
+1,ALL,pointcloud_generation,0.0186,0,5858

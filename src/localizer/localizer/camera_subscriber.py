@@ -19,6 +19,7 @@ from . import pointcloud
 from . import marker
 import time
 from .timing_logger import TimingLogger
+from sensor_msgs.msg import CameraInfo
 
 # import marker
 from visualization_msgs.msg import Marker
@@ -49,6 +50,14 @@ class CameraSubscriber(Node):
             "floor",
             "wall"
         ]
+
+        # fallback (camera intrinsics)
+        self.fx = 912.66455078125
+        self.fy = 912.659912109375
+        self.cx = 646.881591796875
+        self.cy = 376.11798095703125
+
+        self.has_intrinsics = False
 
         self.class_to_id = {"background": 0}
         self.next_class_id = 1
@@ -165,6 +174,13 @@ class CameraSubscriber(Node):
             10
         )
 
+        self.create_subscription(
+            CameraInfo,
+            '/camera/camera/aligned_depth_to_color/camera_info',
+            self.camera_info_callback,
+            10
+        )
+
         self.get_logger().info(
             f"CameraSubscriber initialized | prompt={self.current_prompt} | "
             f"sam3_processor_resolution={self.sam3.resolution} | "
@@ -247,12 +263,18 @@ class CameraSubscriber(Node):
             for y in range(0, h, granularity):
                 depth = depth_img[y][x]
                 if depth == 0: continue
-                x_pos = (((float(x)+offset[0])/original_img_size[0]) - 0.5)* depth
-                y_pos = -(((float(y)+offset[1])/original_img_size[1]) - 0.5) * original_img_size[1]/original_img_size[0] * depth
+                
+                Z = depth
+                X = (x - self.cx) * Z / self.fx
+                Y = (y - self.cy) * Z / self.fy
                 color = color_img[y][x]
                 semantic_id = semantic_map[y][x]
-                points[i] = [x_pos, depth, y_pos, int(color[0]), int(color[1]), int(color[2]), int(semantic_id)]
-                
+                points[i] = [
+                    X, Z, -Y,
+                    int(color[0]), int(color[1]), int(color[2]),
+                    int(semantic_id)
+                ]
+
                 i += 1
                 if i == num_points:
                     break
@@ -618,6 +640,21 @@ class CameraSubscriber(Node):
             cv2.COLOR_HSV2BGR
         )[0][0]
         return tuple(int(c) for c in color)
+    
+    def camera_info_callback(self, msg):
+        k = msg.k
+
+        self.fx = k[0]
+        self.fy = k[4]
+        self.cx = k[2]
+        self.cy = k[5]
+
+        if not self.has_intrinsics:
+            self.get_logger().info(
+                f"Received intrinsics: fx={self.fx:.2f}, fy={self.fy:.2f}, "
+                f"cx={self.cx:.2f}, cy={self.cy:.2f}"
+            )
+            self.has_intrinsics = True
 
 def main(args=None):
     try:
