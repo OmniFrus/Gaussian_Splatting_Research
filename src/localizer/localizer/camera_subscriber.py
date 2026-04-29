@@ -17,7 +17,7 @@ import traceback
 import torch
 from . import pointcloud
 from . import marker
-# import pointcloud
+
 # import marker
 from visualization_msgs.msg import Marker
 
@@ -41,26 +41,14 @@ class CameraSubscriber(Node):
             "table",
             "person",
             "monitor",
-            "keyboard"
+            "keyboard",
+            "mouse",
+            "floor",
+            "wall"
         ]
 
-        # BGR colors for OpenCV
-        self.class_colors = {
-            "chair": (0, 255, 0),        
-            "table": (255, 0, 0),        
-            "person": (0, 0, 255),       
-            "monitor": (255, 0, 255),    
-            "keyboard": (0, 255, 255)
-        }
-
-        self.class_to_id = {
-            "background": 0,
-            "chair": 1,
-            "table": 2,
-            "person": 3,
-            "monitor": 4,
-            "keyboard": 5,
-        }
+        self.class_to_id = {"background": 0}
+        self.next_class_id = 1
 
         self.declare_parameter('confidence', 0.2)
         self.declare_parameter('num_points', 10000)
@@ -270,12 +258,12 @@ class CameraSubscriber(Node):
         points.resize((i, 6))
         return points
 
-    def create_pointcloud_adaptive(self, color_img, depth_img, num_points, original_img_size, offset):
+    def create_pointcloud_adaptive(self, color_img, depth_img, semantic_map, num_points, original_img_size, offset):
         h, w = depth_img.shape[:2]
         hp, wp = h/original_img_size[1], w/original_img_size[0]
         step = max(1, int(np.count_nonzero(depth_img) / num_points))
 
-        points = np.zeros((num_points, 6))
+        points = np.zeros((num_points, 7))
         points_found = 0
         points_stored = 0
 
@@ -291,14 +279,14 @@ class CameraSubscriber(Node):
             x_pos = ((float(x) + offset[0])/original_img_size[0] -.5) * depth
             y_pos = -((float(y) +  offset[1])/original_img_size[1] -.5) * depth *(original_img_size[1]/original_img_size[0])
             color = color_img[y][x]
-                
-            points[points_stored] = [x_pos, depth, y_pos, *color]
+            semantic_id = semantic_map[y][x]
+            points[points_stored] = [x_pos, depth, y_pos, int(color[0]), int(color[1]), int(color[2]), int(semantic_id)]
             
             points_stored += 1
             if points_stored == num_points:
                 break
         
-        points.resize((points_stored, 6))
+        points.resize((points_stored, 7))
         return points
     
     def rgbd_callback(self, msg):
@@ -378,8 +366,8 @@ class CameraSubscriber(Node):
 
                     semantic_mask = np.logical_or(semantic_mask, class_mask).astype(np.uint8)
 
-                    class_id = self.class_to_id.get(class_name, 255)
-                    color = self.class_colors.get(class_name, (255, 255, 255))
+                    class_id = self.get_class_id(class_name)
+                    color = self.get_class_color(class_name)
 
                     if class_mask.shape[:2] != semantic_map.shape[:2]:
                         class_mask_resized = cv2.resize(
@@ -492,11 +480,10 @@ class CameraSubscriber(Node):
                     if score is not None and len(score) > i:
                         s = score[i]
 
-                    label = self.current_prompt
-                    if "labels" in locals() and labels is not None and len(labels) > i:
-                        label = labels[i]
+                    label = labels[i] if labels is not None and len(labels) > i else self.current_prompt
 
-                    color = self.class_colors.get(label, (255, 255, 255))
+                    class_id = self.get_class_id(label)
+                    color = self.get_class_color(label)
 
                     cv2.rectangle(detection_color_img, (x1, y1), (x2, y2), color, 2)
 
@@ -524,9 +511,10 @@ class CameraSubscriber(Node):
                 f"Frame {self.frame_count}: masked_depth_nonzero={int(np.count_nonzero(masked_depth))}"
             )
 
-            points = self.create_pointcloud(
-                color_img,
+            points = self.create_pointcloud_adaptive(
+                semantic_map_color,
                 masked_depth,
+                semantic_map,
                 self.num_points,
                 (original_w, original_h),
                 tracked_position,
@@ -551,6 +539,26 @@ class CameraSubscriber(Node):
         finally:
             self.get_logger().info(f"Frame {self.frame_count}: processing complete")
             self.processing = False
+
+    def get_class_id(self, class_name):
+        if class_name not in self.class_to_id:
+            self.class_to_id[class_name] = self.next_class_id
+            self.next_class_id += 1
+
+            self.get_logger().info(
+                f"New class detected: '{class_name}' → ID {self.class_to_id[class_name]}"
+            )
+
+        return self.class_to_id[class_name]
+    
+    def get_class_color(self, class_name):
+        class_id = self.get_class_id(class_name)
+        hue = (class_id * 40) % 180  # spread colors
+        color = cv2.cvtColor(
+            np.uint8([[[hue, 255, 255]]]),
+            cv2.COLOR_HSV2BGR
+        )[0][0]
+        return tuple(int(c) for c in color)
 
 def main(args=None):
     try:
