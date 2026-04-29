@@ -14,8 +14,8 @@ Last updated: April 29 2026
 
 - [x] Replace object-centric pipeline with full-image semantic segmentation (Sam3).
 - [x] Publish semantic segmentation outputs (`/semantic_map_color`, `/semantic_map`).
-- [~] Extend pipeline to generate semantic point clouds.
-- [~] Integrate depth data for 3D semantic reconstruction.
+- [x] Extend pipeline to generate semantic point clouds.
+- [x] Integrate depth data for 3D semantic reconstruction.
 - [ ] Explore advanced models (e.g., DFormer) as potential improvements.
 - [ ] Prepare pipeline for Gaussian Splatting integration.
 - [ ] Overhaul UI for semantic-based interaction instead of object tracking.
