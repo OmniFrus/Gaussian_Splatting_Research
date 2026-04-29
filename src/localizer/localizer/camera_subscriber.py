@@ -345,6 +345,8 @@ class CameraSubscriber(Node):
                 all_scores = []
                 all_labels = []
 
+                image_state = self.sam3.set_image_once(color_img)
+
                 for class_name in prompts:
                     self.get_logger().info(
                         f"Frame {self.frame_count}: running SAM3 for class '{class_name}'"
@@ -352,8 +354,8 @@ class CameraSubscriber(Node):
 
                     class_start_time = time.perf_counter()
 
-                    masks, boxes, scores = self.sam3.all_masks(
-                        color_img,
+                    masks, boxes, scores = self.sam3.all_masks_from_state(
+                        image_state,
                         class_name,
                         score_threshold=0.3
                     )

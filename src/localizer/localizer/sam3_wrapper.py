@@ -147,3 +147,49 @@ class SAM3Wrapper:
             out_scores,
         )
         return out_masks, out_boxes, out_scores
+
+    def all_masks_from_state(self, state, prompt: str, score_threshold: float = 0.0):
+        with torch.autocast(device_type="cpu", enabled=False):
+            output = self.processor.set_text_prompt(state=state, prompt=prompt)
+
+        masks = output["masks"]
+        boxes = output["boxes"]
+        scores = output["scores"]
+
+        if masks is None or len(masks) == 0:
+            return [], [], []
+
+        out_masks = []
+        out_boxes = []
+        out_scores = []
+
+        for i in range(len(masks)):
+            score = None
+            if scores is not None and len(scores) > i:
+                score = float(scores[i].detach().cpu().item())
+
+            if score is not None and score < score_threshold:
+                continue
+
+            mask = masks[i].detach().cpu().numpy()
+            mask = np.squeeze(mask)
+            mask = (mask > 0).astype(np.uint8)
+
+            box = None
+            if boxes is not None and len(boxes) > i:
+                box = boxes[i].detach().cpu().numpy()
+
+            out_masks.append(mask)
+            out_boxes.append(box)
+            out_scores.append(score)
+
+        return out_masks, out_boxes, out_scores
+    
+    def set_image_once(self, image_bgr: np.ndarray):
+        image_rgb = image_bgr[:, :, ::-1]
+        pil_image = Image.fromarray(image_rgb)
+
+        with torch.autocast(device_type="cpu", enabled=False):
+            state = self.processor.set_image(pil_image)
+
+        return state
