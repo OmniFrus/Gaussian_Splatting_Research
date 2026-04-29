@@ -10,12 +10,12 @@
 [https://docs.google.com/presentation/d/1NKJ7fA-q3cYdW05NNqbInGAht0XvYVoJxhGapSL4USc/edit?slide=id.g3d918da5dca_9_0#slide=id.g3d918da5dca_9_0]
 
 ## Progress
-Last updated: Jan 30 2026
+Last updated: April 29 2026
 
-- [ ] Replace object-centric pipeline with full-image semantic segmentation (Sam3).
-- [ ] Publish semantic segmentation outputs (`/semantic_image`).
-- [ ] Extend pipeline to generate semantic point clouds.
-- [ ] Integrate depth data for 3D semantic reconstruction.
+- [x] Replace object-centric pipeline with full-image semantic segmentation (Sam3).
+- [x] Publish semantic segmentation outputs (`/semantic_map_color`, `/semantic_map`).
+- [~] Extend pipeline to generate semantic point clouds.
+- [~] Integrate depth data for 3D semantic reconstruction.
 - [ ] Explore advanced models (e.g., DFormer) as potential improvements.
 - [ ] Prepare pipeline for Gaussian Splatting integration.
 - [ ] Overhaul UI for semantic-based interaction instead of object tracking.
