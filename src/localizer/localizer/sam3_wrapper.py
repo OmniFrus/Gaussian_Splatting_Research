@@ -1,6 +1,4 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
-
 import logging
 import time
 import numpy as np
@@ -19,8 +17,10 @@ class SAM3Wrapper:
         self.model_expected_resolution = 1008
         self.logger = logging.getLogger(__name__)
 
-        self.model = build_sam3_image_model(device="cpu")
-        self.model = self.model.float()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.model = build_sam3_image_model(device=self.device.type)
+        self.model = self.model.to(self.device)
         self.model.eval()
 
         self.processor = self._build_processor(self.resolution)
@@ -37,13 +37,14 @@ class SAM3Wrapper:
                 self.resolution,
                 self.model_expected_resolution,
             )
+        print("DEVICE:", self.device)
 
     def _build_processor(self, resolution: int):
         self.logger.info("Building SAM3 processor with resolution=%d", resolution)
         return Sam3Processor(
             self.model,
             resolution=resolution,
-            device="cpu",
+            device=self.model.device.type,
         )
 
     def set_prompt(self, prompt: str):
@@ -67,7 +68,7 @@ class SAM3Wrapper:
 
         t0 = time.perf_counter()
         try:
-            with torch.autocast(device_type="cpu", enabled=False):
+            with torch.autocast(device_type="cuda", enabled=torch.cuda.is_available()):
                 state = self.processor.set_image(pil_image)
                 output = self.processor.set_text_prompt(state=state, prompt=prompt)
         except AssertionError as err:
@@ -82,7 +83,7 @@ class SAM3Wrapper:
                 )
                 self.resolution = self.model_expected_resolution
                 self.processor = self._build_processor(self.resolution)
-                with torch.autocast(device_type="cpu", enabled=False):
+                with torch.autocast(device_type="cuda", enabled=torch.cuda.is_available()):
                     state = self.processor.set_image(pil_image)
                     output = self.processor.set_text_prompt(state=state, prompt=prompt)
             else:
@@ -149,7 +150,11 @@ class SAM3Wrapper:
         return out_masks, out_boxes, out_scores
 
     def all_masks_from_state(self, state, prompt: str, score_threshold: float = 0.0):
-        with torch.autocast(device_type="cpu", enabled=False):
+        with torch.inference_mode(), torch.autocast(
+            device_type=self.device.type,
+            enabled=self.device.type == "cuda",
+            dtype=torch.float16
+        ):
             output = self.processor.set_text_prompt(state=state, prompt=prompt)
 
         masks = output["masks"]
@@ -189,7 +194,11 @@ class SAM3Wrapper:
         image_rgb = image_bgr[:, :, ::-1]
         pil_image = Image.fromarray(image_rgb)
 
-        with torch.autocast(device_type="cpu", enabled=False):
+        with torch.inference_mode(), torch.autocast(
+            device_type=self.device.type,
+            enabled=self.device.type == "cuda",
+            dtype=torch.float16
+        ):
             state = self.processor.set_image(pil_image)
 
         return state

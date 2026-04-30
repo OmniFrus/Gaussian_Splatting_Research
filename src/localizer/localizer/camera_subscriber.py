@@ -20,6 +20,7 @@ from . import marker
 import time
 from .timing_logger import TimingLogger
 from sensor_msgs.msg import CameraInfo
+from sensor_msgs.msg import Imu
 
 # import marker
 from visualization_msgs.msg import Marker
@@ -31,6 +32,11 @@ qos_profile = QoSProfile(
     durability=DurabilityPolicy.VOLATILE
 )
 
+imu_qos = QoSProfile(
+    reliability=ReliabilityPolicy.BEST_EFFORT,
+    history=HistoryPolicy.KEEP_LAST,
+    depth=10
+)
 
 class CameraSubscriber(Node):
     def __init__(self):
@@ -92,6 +98,8 @@ class CameraSubscriber(Node):
         self.last_overlay = None
         self.last_semantic_map = None
         self.last_semantic_map_color = None
+        self.latest_accel = None
+        self.latest_gyro = None
         self.last_sam3_frame = 0
         
         self.bridge = cv_bridge.CvBridge()
@@ -179,6 +187,20 @@ class CameraSubscriber(Node):
             '/camera/camera/aligned_depth_to_color/camera_info',
             self.camera_info_callback,
             10
+        )
+
+        self.create_subscription(
+            Imu,
+            "/camera/camera/accel/sample",
+            self.accel_callback,
+            imu_qos
+        )
+
+        self.create_subscription(
+            Imu,
+            "/camera/camera/gyro/sample",
+            self.gyro_callback,
+            imu_qos
         )
 
         self.get_logger().info(
@@ -325,6 +347,21 @@ class CameraSubscriber(Node):
         self.frame_count += 1
         self.get_logger().info(f"RGBD callback received, frame {self.frame_count}")
 
+        if self.frame_count % 5 == 0:
+            if self.latest_accel is not None:
+                self.get_logger().info(
+                    f"ACCEL=({self.latest_accel.linear_acceleration.x:.3f}, "
+                    f"{self.latest_accel.linear_acceleration.y:.3f}, "
+                    f"{self.latest_accel.linear_acceleration.z:.3f})"
+                )
+
+            if self.latest_gyro is not None:
+                self.get_logger().info(
+                    f"GYRO=({self.latest_gyro.angular_velocity.x:.3f}, "
+                    f"{self.latest_gyro.angular_velocity.y:.3f}, "
+                    f"{self.latest_gyro.angular_velocity.z:.3f})"
+                )
+        
         try:
             self.get_logger().info(f"Frame {self.frame_count}: converting RGB image")
             image = self.bridge.imgmsg_to_cv2(msg.rgb, desired_encoding="rgb8")
@@ -379,7 +416,7 @@ class CameraSubscriber(Node):
                     masks, boxes, scores = self.sam3.all_masks_from_state(
                         image_state,
                         class_name,
-                        score_threshold=0.3
+                        score_threshold=self.confidence
                     )
 
                     class_elapsed = time.perf_counter() - class_start_time
@@ -655,6 +692,12 @@ class CameraSubscriber(Node):
                 f"cx={self.cx:.2f}, cy={self.cy:.2f}"
             )
             self.has_intrinsics = True
+
+    def accel_callback(self, msg):
+        self.latest_accel = msg
+
+    def gyro_callback(self, msg):
+        self.latest_gyro = msg
 
 def main(args=None):
     try:
