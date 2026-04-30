@@ -61,6 +61,7 @@ Install torchvision:
 
 Run the following in the working directory:
 ```sh
+conda activate sam3
 source /opt/ros/humble/setup.bash
 colcon build --packages-select localizer --symlink-install
 export PYTHONPATH=/home/wesley/Documents/sam3-main:$PYTHONPATH
