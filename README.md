@@ -64,7 +64,7 @@ Run the following in the working directory:
 conda activate sam3
 source /opt/ros/humble/setup.bash
 colcon build --packages-select localizer --symlink-install
-export PYTHONPATH=/home/wesley/Documents/sam3-main:$PYTHONPATH
+export PYTHONPATH=/home/wesley/Documents/sam3:$PYTHONPATH
 source install/setup.bash
 ros2 run localizer config_ui
 ```
