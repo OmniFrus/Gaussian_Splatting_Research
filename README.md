@@ -10,18 +10,27 @@
 [https://docs.google.com/presentation/d/1NKJ7fA-q3cYdW05NNqbInGAht0XvYVoJxhGapSL4USc/edit?slide=id.g3d918da5dca_9_0#slide=id.g3d918da5dca_9_0]
 
 ## Progress
-Last updated: April 29 2026
-
+Last updated: May 1 2026
 - [x] Replace object-centric pipeline with full-image semantic segmentation (Sam3).
 - [x] Publish semantic segmentation outputs (`/semantic_map_color`, `/semantic_map`).
 - [x] Extend pipeline to generate semantic point clouds.
-- [x] Integrate depth data for 3D semantic reconstruction.
-- [ ] Explore advanced models (e.g., DFormer) as potential improvements.
-- [ ] Prepare pipeline for Gaussian Splatting integration.
-- [ ] Overhaul UI for semantic-based interaction instead of object tracking.
-- [ ] Improve performance on Jetson Orin Nano by decreasing CPU usage.
-- [ ] Run new performance and robustness tests.
+- [x] Integrate depth data and camera intrinsics for 3D semantic reconstruction.
+- [x] Add basic IMU subscriptions and logging.
+- [x] Add semantic class input in the UI, including multiple comma-separated class names.
+- [x] Improve semantic pointcloud sampling using balanced/random per-class sampling.
+
+- [ ] Fix depth scaling and verify metric 3D pointcloud distances.
+- [ ] Refactor `camera_subscriber.py` into smaller modules/functions.
+- [ ] Run performance tests with different class prompts and `sam3_run_every_n_frames`.
+- [ ] Run robustness tests with occlusion, motion blur, noisy/missing depth.
+- [ ] Prepare pipeline outputs for Gaussian Splatting integration.
+- [ ] Integrate Gaussian Splatting baseline.
 - [ ] Update launch file and write documentation.
+
+## Future / Optional
+
+- [ ] Explore faster semantic segmentation models such as SegFormer or DFormer.
+- [ ] Explore SAM3 video/tracking mode for temporal consistency.
 
 ## Overview
 
