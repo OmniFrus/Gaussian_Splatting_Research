@@ -36,13 +36,20 @@ class ConfigUI:
         
         # Class name setting
         tk.Label(controls_frame, text="Class name:", anchor="w").grid(row=3, column=0, padx=10, pady=10, sticky="w")
-        self.class_name_entry = tk.Entry(controls_frame, width=20)
-        self.class_name_entry.insert(0, "chair")
-        self.class_name_entry.grid(row=3, column=1, padx=10, pady=10)
+        self.class_name_entry = tk.Entry(controls_frame, width=45)
+        self.class_name_entry.insert(0, "chair, table, person")
+        self.class_name_entry.grid(row=3, column=1, columnspan=2, padx=10, pady=10, sticky="w")
+
+        tk.Label(
+            controls_frame,
+            text="Use comma-separated classes, e.g. chair, table, person, if empty it will take a pre-defined list",
+            font=("Arial", 8),
+            fg="gray"
+        ).grid(row=4, column=1, columnspan=2, padx=10, sticky="w")
 
         # Status label
         self.status_label = tk.Label(controls_frame, text="Ready to start", fg="green")
-        self.status_label.grid(row=3, column=0, columnspan=3, pady=20)
+        self.status_label.grid(row=10, column=0, columnspan=3, pady=10)
 
         # Start button
         self.start_button = tk.Button(
@@ -50,7 +57,7 @@ class ConfigUI:
             bg="#4CAF50", fg="white", font=("Arial", 12),
             width=15, height=2
         )
-        self.start_button.grid(row=4, column=0, columnspan=3, pady=10)
+        self.start_button.grid(row=6, column=0, columnspan=3, pady=10)
 
         # Restart subscriber button
         self.restart_button = tk.Button(
@@ -58,7 +65,7 @@ class ConfigUI:
             bg="#FF9800", fg="white", font=("Arial", 12),
             width=15, height=2, state="disabled"
         )
-        self.restart_button.grid(row=5, column=0, columnspan=3, pady=10)
+        self.restart_button.grid(row=7, column=0, columnspan=3, pady=10)
 
         # Stop button (same behavior as closing the UI)
         self.stop_button = tk.Button(
@@ -66,14 +73,14 @@ class ConfigUI:
             bg="#F44336", fg="white", font=("Arial", 12),
             width=15, height=2, state="disabled"
         )
-        self.stop_button.grid(row=6, column=0, columnspan=3, pady=10)
+        self.stop_button.grid(row=8, column=0, columnspan=3, pady=10)
 
         self.send_button = tk.Button(
             controls_frame, text="Send", command=self.send_config,
             bg="#D436F4", fg="white", font=("Arial", 12),
             width=15, height=2
         )
-        self.send_button.grid(row=7, column=0, columnspan=3, pady=10)
+        self.send_button.grid(row=9, column=0, columnspan=3, pady=10)
 
         # Input source setting
         tk.Label(controls_frame, text="Input source:", anchor="w").grid(row=2, column=0, padx=10, pady=10, sticky="w")

@@ -337,6 +337,62 @@ class CameraSubscriber(Node):
         
         points.resize((points_stored, 7))
         return points
+
+    def create_balanced_semantic_pointcloud(self, color_img, depth_img, semantic_map, num_points):
+        class_ids = [c for c in np.unique(semantic_map) if c != 0]
+
+        if len(class_ids) == 0:
+            return np.zeros((0, 7))
+
+        points_per_class = max(1, num_points // len(class_ids))
+        all_points = []
+
+        for class_id in class_ids:
+            points = self.create_pointcloud_from_mask_random(
+                color_img,
+                depth_img,
+                semantic_map,
+                class_id,
+                points_per_class
+            )
+
+            if len(points) > 0:
+                all_points.append(points)
+
+        if len(all_points) == 0:
+            return np.zeros((0, 7))
+
+        return np.vstack(all_points)
+
+    def create_pointcloud_from_mask_random(self, color_img, depth_img, semantic_map, class_id, num_points):
+        ys, xs = np.where((semantic_map == class_id) & (depth_img > 0))
+
+        if len(xs) == 0:
+            return np.zeros((0, 7))
+
+        n = min(num_points, len(xs))
+        idx = np.random.choice(len(xs), size=n, replace=False)
+
+        xs = xs[idx]
+        ys = ys[idx]
+
+        points = np.zeros((n, 7))
+
+        for i, (x, y) in enumerate(zip(xs, ys)):
+            Z = depth_img[y, x]
+            X = (x - self.cx) * Z / self.fx
+            Y = (y - self.cy) * Z / self.fy
+
+            color = color_img[y, x]
+            semantic_id = semantic_map[y, x]
+
+            points[i] = [
+                X, Z, -Y,
+                int(color[0]), int(color[1]), int(color[2]),
+                int(semantic_id)
+            ]
+
+        return points  
     
     def rgbd_callback(self, msg):
         if self.processing:
@@ -389,7 +445,11 @@ class CameraSubscriber(Node):
                         f"Running SAM3 full-scene mode with classes: {prompts}"
                     )
                 else:
-                    prompts = [self.current_prompt]
+                    prompts = [
+                        p.strip()
+                        for p in self.current_prompt.split(",")
+                        if p.strip()
+                    ]
                     self.get_logger().info(
                         f"Running SAM3 single-class mode with prompt: {self.current_prompt}"
                     )
@@ -404,7 +464,22 @@ class CameraSubscriber(Node):
                 all_scores = []
                 all_labels = []
 
+                embed_start = time.perf_counter()
                 image_state = self.sam3.set_image_once(color_img)
+                embed_elapsed = time.perf_counter() - embed_start
+
+                self.timing_logger.log(
+                    frame=self.frame_count,
+                    class_name="ALL",
+                    stage="sam3_image_embedding",
+                    elapsed_seconds=embed_elapsed,
+                    num_masks=0,
+                    num_points=0
+                )
+
+                self.get_logger().info(
+                    f"TIMING frame={self.frame_count}, sam3_image_embedding_time={embed_elapsed:.4f}s"
+                )
 
                 for class_name in prompts:
                     self.get_logger().info(
@@ -613,13 +688,20 @@ class CameraSubscriber(Node):
 
             pc_start = time.perf_counter()
 
-            points = self.create_pointcloud(
+            #points = self.create_pointcloud(
+            #    semantic_map_color,
+            #    masked_depth,
+            #    semantic_map,
+            #    self.num_points,
+            #    (original_w, original_h),
+            #    tracked_position,
+            #)
+
+            points = self.create_balanced_semantic_pointcloud(
                 semantic_map_color,
-                masked_depth,
+                depth_img,
                 semantic_map,
-                self.num_points,
-                (original_w, original_h),
-                tracked_position,
+                self.num_points
             )
 
             pc_elapsed = time.perf_counter() - pc_start
