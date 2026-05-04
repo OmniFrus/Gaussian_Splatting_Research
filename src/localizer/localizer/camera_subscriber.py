@@ -16,10 +16,11 @@ from .sam3_wrapper import SAM3Wrapper
 import traceback
 import torch
 from . import pointcloud
+from . import semantic_pointcloud
+from .class_registry import ClassRegistry
 from . import marker
 import time
 from .timing_logger import TimingLogger
-from .sampling_logger import SamplingLogger
 from sensor_msgs.msg import CameraInfo
 from sensor_msgs.msg import Imu
 
@@ -42,22 +43,11 @@ imu_qos = QoSProfile(
 class CameraSubscriber(Node):
     def __init__(self):
         self.timing_logger = TimingLogger()
-        self.sampling_logger = SamplingLogger()
         self.processing = False
         self.frame_count = 0
         super().__init__("localizer_3D")
         self.sam3 = SAM3Wrapper(default_prompt="", resolution=1008)
         self.current_prompt = "" 
-        self.default_classes = [
-            "chair",
-            "table",
-            "person",
-            "monitor",
-            "keyboard",
-            "mouse",
-            "floor",
-            "wall"
-        ]
 
         # fallback (camera intrinsics)
         self.fx = 912.66455078125
@@ -67,8 +57,7 @@ class CameraSubscriber(Node):
 
         self.has_intrinsics = False
 
-        self.class_to_id = {"background": 0}
-        self.next_class_id = 1
+        self.class_registry = ClassRegistry()
 
         self.declare_parameter('confidence', 0.2)
         self.declare_parameter('num_points', 10000)
@@ -83,7 +72,7 @@ class CameraSubscriber(Node):
 
         if self.current_prompt.strip() == "":
             self.get_logger().info(
-                f"SAM3 prompt empty: using default classes {self.default_classes}"
+                f"SAM3 prompt empty: using default classes {self.class_registry.default_classes}"
             )
         else:
             self.sam3.set_prompt(self.current_prompt)
@@ -231,7 +220,7 @@ class CameraSubscriber(Node):
 
         if self.current_prompt == "":
             self.get_logger().info(
-                f"SAM3 prompt empty: using default classes {self.default_classes}"
+                f"SAM3 prompt empty: using default classes {self.class_registry.default_classes}"
             )
         else:
             self.sam3.set_prompt(self.current_prompt)
@@ -278,249 +267,6 @@ class CameraSubscriber(Node):
         quaternion = marker.rotation_matrix_to_quaternion(R)
         
         return (centroid, quaternion)
-
-
-    def create_pointcloud(self, color_img, depth_img, semantic_map, num_points, original_img_size, offset):
-        h, w = depth_img.shape[:2]
-        granularity = int(np.sqrt((w*h)/num_points))
-        if granularity < 1: granularity = 1
-
-        num_points = min(num_points, np.count_nonzero(depth_img))
-
-        points = np.zeros((num_points, 7))
-        i = 0
-        for x in range(0, w, granularity):
-            for y in range(0, h, granularity):
-                depth = depth_img[y][x]
-                if depth == 0: continue
-                
-                Z = depth
-                X = (x - self.cx) * Z / self.fx
-                Y = (y - self.cy) * Z / self.fy
-                color = color_img[y][x]
-                semantic_id = semantic_map[y][x]
-                points[i] = [
-                    X, Z, -Y,
-                    int(color[0]), int(color[1]), int(color[2]),
-                    int(semantic_id)
-                ]
-
-                i += 1
-                if i == num_points:
-                    break
-            else:
-                continue
-            break
-
-        points.resize((i, 7))
-        return points
-
-    def create_pointcloud_adaptive(self, color_img, depth_img, semantic_map, num_points, original_img_size, offset):
-        h, w = depth_img.shape[:2]
-        hp, wp = h/original_img_size[1], w/original_img_size[0]
-        step = max(1, int(np.count_nonzero(depth_img) / num_points))
-
-        points = np.zeros((num_points, 7))
-        points_found = 0
-        points_stored = 0
-
-        non_zero_indices = np.nonzero(depth_img)
-        non_zero_indices = zip(non_zero_indices[0], non_zero_indices[1])
-
-        for y, x in list(non_zero_indices):
-            depth = depth_img[y][x]
-            points_found += 1
-            if (points_found-1) % step != 0:
-                continue
-            
-            x_pos = ((float(x) + offset[0])/original_img_size[0] -.5) * depth
-            y_pos = -((float(y) +  offset[1])/original_img_size[1] -.5) * depth *(original_img_size[1]/original_img_size[0])
-            color = color_img[y][x]
-            semantic_id = semantic_map[y][x]
-            points[points_stored] = [x_pos, depth, y_pos, int(color[0]), int(color[1]), int(color[2]), int(semantic_id)]
-            
-            points_stored += 1
-            if points_stored == num_points:
-                break
-        
-        points.resize((points_stored, 7))
-        return points
-
-    def create_balanced_semantic_pointcloud(self, color_img, depth_img, semantic_map, num_points):
-        class_ids = [c for c in np.unique(semantic_map) if c != 0]
-
-        if len(class_ids) == 0:
-            return np.zeros((0, 7))
-
-        points_per_class = max(1, num_points // len(class_ids))
-        all_points = []
-
-        for class_id in class_ids:
-            points = self.create_pointcloud_from_mask_random(
-                color_img,
-                depth_img,
-                semantic_map,
-                class_id,
-                points_per_class
-            )
-
-            if len(points) > 0:
-                all_points.append(points)
-
-        if len(all_points) == 0:
-            return np.zeros((0, 7))
-
-        return np.vstack(all_points)
-
-    def create_pointcloud_from_mask_random(self, color_img, depth_img, semantic_map, class_id, num_points):
-        ys, xs = np.where((semantic_map == class_id) & (depth_img > 0))
-
-        if len(xs) == 0:
-            return np.zeros((0, 7))
-
-        n = min(num_points, len(xs))
-        idx = np.random.choice(len(xs), size=n, replace=False)
-
-        xs = xs[idx]
-        ys = ys[idx]
-
-        points = np.zeros((n, 7))
-
-        for i, (x, y) in enumerate(zip(xs, ys)):
-            Z = depth_img[y, x]
-            X = (x - self.cx) * Z / self.fx
-            Y = (y - self.cy) * Z / self.fy
-
-            color = color_img[y, x]
-            semantic_id = semantic_map[y, x]
-
-            points[i] = [
-                X, Z, -Y,
-                int(color[0]), int(color[1]), int(color[2]),
-                int(semantic_id)
-            ]
-
-        return points  
-
-    def create_area_aware_semantic_pointcloud(self, color_img, depth_img, semantic_map, num_points):
-        """
-        Area-aware semantic point cloud sampling.
-
-        Goal:
-        - Large classes get more points than small classes.
-        - Small classes still remain visible.
-        - Huge classes like wall/floor cannot dominate everything.
-        - No manual class weights needed.
-        """
-
-        class_ids = [c for c in np.unique(semantic_map) if c != 0]
-
-        if len(class_ids) == 0:
-            return np.zeros((0, 7))
-
-        # Tuning values
-        min_points_per_class = 300
-        max_fraction_per_class = 0.45
-
-        max_points_per_class = int(num_points * max_fraction_per_class)
-
-        # Count valid depth pixels per class
-        class_pixel_counts = {}
-        for class_id in class_ids:
-            count = np.count_nonzero((semantic_map == class_id) & (depth_img > 0))
-            if count > 0:
-                class_pixel_counts[class_id] = count
-
-        if len(class_pixel_counts) == 0:
-            return np.zeros((0, 7))
-
-        # Use sqrt(area), not area.
-        # This gives big classes more points, but not overwhelmingly more.
-        class_scores = {
-            class_id: np.sqrt(pixel_count)
-            for class_id, pixel_count in class_pixel_counts.items()
-        }
-
-        total_score = sum(class_scores.values())
-
-        all_points = []
-
-        for class_id, score in class_scores.items():
-            raw_budget = int(num_points * (score / total_score))
-
-            # Protect small objects, cap huge objects
-            class_budget = max(min_points_per_class, raw_budget)
-            class_budget = min(max_points_per_class, class_budget)
-
-            # Never request more points than valid pixels
-            class_budget = min(class_budget, class_pixel_counts[class_id])
-
-            points = self.create_pointcloud_from_mask_grid(
-                color_img,
-                depth_img,
-                semantic_map,
-                class_id,
-                class_budget
-            )
-
-            if len(points) > 0:
-                all_points.append(points)
-
-        if len(all_points) == 0:
-            return np.zeros((0, 7))
-
-        points = np.vstack(all_points)
-
-        # If min budgets caused too many total points, downsample back to num_points
-        if len(points) > num_points:
-            idx = np.random.choice(len(points), size=num_points, replace=False)
-            points = points[idx]
-
-        return points
-
-
-    def create_pointcloud_from_mask_grid(self, color_img, depth_img, semantic_map, class_id, num_points):
-        """
-        Stable grid-like sampling inside one semantic class.
-        This avoids random flickering and gives better visual coverage.
-        """
-
-        ys, xs = np.where((semantic_map == class_id) & (depth_img > 0))
-
-        if len(xs) == 0:
-            return np.zeros((0, 7))
-
-        n_available = len(xs)
-        n = min(num_points, n_available)
-
-        # Sort pixels spatially so sampling is more stable than pure random
-        order = np.lexsort((xs, ys))
-        xs = xs[order]
-        ys = ys[order]
-
-        # Evenly sample through the sorted mask pixels
-        if n_available > n:
-            idx = np.linspace(0, n_available - 1, n, dtype=np.int32)
-            xs = xs[idx]
-            ys = ys[idx]
-
-        points = np.zeros((len(xs), 7))
-
-        for i, (x, y) in enumerate(zip(xs, ys)):
-            Z = depth_img[y, x]
-            X = (x - self.cx) * Z / self.fx
-            Y = (y - self.cy) * Z / self.fy
-
-            color = color_img[y, x]
-            semantic_id = semantic_map[y, x]
-
-            points[i] = [
-                X, Z, -Y,
-                int(color[0]), int(color[1]), int(color[2]),
-                int(semantic_id)
-            ]
-
-        return points
     
     def rgbd_callback(self, msg):
         if self.processing:
@@ -568,7 +314,7 @@ class CameraSubscriber(Node):
 
             if run_sam3_this_frame:
                 if self.current_prompt.strip() == "":
-                    prompts = self.default_classes
+                    prompts = self.class_registry.default_classes
                     self.get_logger().info(
                         f"Running SAM3 full-scene mode with classes: {prompts}"
                     )
@@ -654,8 +400,8 @@ class CameraSubscriber(Node):
 
                     semantic_mask = np.logical_or(semantic_mask, class_mask).astype(np.uint8)
 
-                    class_id = self.get_class_id(class_name)
-                    color = self.get_class_color(class_name)
+                    class_id = self.class_registry.get_class_id(class_name)
+                    color = self.class_registry.get_class_color(class_name)
 
                     if class_mask.shape[:2] != semantic_map.shape[:2]:
                         class_mask_resized = cv2.resize(
@@ -785,8 +531,8 @@ class CameraSubscriber(Node):
 
                     label = labels[i] if labels is not None and len(labels) > i else self.current_prompt
 
-                    class_id = self.get_class_id(label)
-                    color = self.get_class_color(label)
+                    class_id = self.class_registry.get_class_id(label)
+                    color = self.class_registry.get_class_color(label)
 
                     cv2.rectangle(detection_color_img, (x1, y1), (x2, y2), color, 2)
 
@@ -816,27 +562,39 @@ class CameraSubscriber(Node):
 
             pc_start = time.perf_counter()
 
-            #points = self.create_pointcloud(
-            #    semantic_map_color,
-            #    masked_depth,
-            #    semantic_map,
-            #    self.num_points,
-            #    (original_w, original_h),
-            #    tracked_position,
-            #)
+            # points = semantic_pointcloud.create_pointcloud(
+            #     semantic_map_color,
+            #     masked_depth,
+            #     semantic_map,
+            #     self.num_points,
+            #     (original_w, original_h),
+            #     tracked_position,
+            #     self.fx,
+            #     self.fy,
+            #     self.cx,
+            #     self.cy
+            # )
 
-            #points = self.create_balanced_semantic_pointcloud(
-            #    semantic_map_color,
-            #    depth_img,
-            #    semantic_map,
-            #    self.num_points
-            #)
+            # points = semantic_pointcloud.create_balanced_semantic_pointcloud(
+            #     semantic_map_color,
+            #     depth_img,
+            #     semantic_map,
+            #     self.num_points,
+            #     self.fx,
+            #     self.fy,
+            #     self.cx,
+            #     self.cy
+            # )
 
-            points = self.create_area_aware_semantic_pointcloud(
+            points = semantic_pointcloud.create_area_aware_semantic_pointcloud(
                 semantic_map_color,
                 depth_img,
                 semantic_map,
-                self.num_points
+                self.num_points,
+                self.fx,
+                self.fy,
+                self.cx,
+                self.cy
             )
 
             pc_elapsed = time.perf_counter() - pc_start
@@ -887,26 +645,6 @@ class CameraSubscriber(Node):
         finally:
             self.get_logger().info(f"Frame {self.frame_count}: processing complete")
             self.processing = False
-
-    def get_class_id(self, class_name):
-        if class_name not in self.class_to_id:
-            self.class_to_id[class_name] = self.next_class_id
-            self.next_class_id += 1
-
-            self.get_logger().info(
-                f"New class detected: '{class_name}' → ID {self.class_to_id[class_name]}"
-            )
-
-        return self.class_to_id[class_name]
-    
-    def get_class_color(self, class_name):
-        class_id = self.get_class_id(class_name)
-        hue = (class_id * 40) % 180  # spread colors
-        color = cv2.cvtColor(
-            np.uint8([[[hue, 255, 255]]]),
-            cv2.COLOR_HSV2BGR
-        )[0][0]
-        return tuple(int(c) for c in color)
     
     def camera_info_callback(self, msg):
         k = msg.k
