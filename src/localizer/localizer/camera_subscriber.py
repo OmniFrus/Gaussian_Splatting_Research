@@ -19,6 +19,7 @@ from . import pointcloud
 from . import marker
 import time
 from .timing_logger import TimingLogger
+from .sampling_logger import SamplingLogger
 from sensor_msgs.msg import CameraInfo
 from sensor_msgs.msg import Imu
 
@@ -41,6 +42,7 @@ imu_qos = QoSProfile(
 class CameraSubscriber(Node):
     def __init__(self):
         self.timing_logger = TimingLogger()
+        self.sampling_logger = SamplingLogger()
         self.processing = False
         self.frame_count = 0
         super().__init__("localizer_3D")
@@ -161,6 +163,12 @@ class CameraSubscriber(Node):
         self.pointcloud_publisher = self.create_publisher(
             sensor_msgs.PointCloud2,
             '/pointcloud',
+            10
+        )
+
+        self.pointcloud_visual_publisher = self.create_publisher(
+            sensor_msgs.PointCloud2,
+            '/pointcloud_visual',
             10
         )
 
@@ -393,6 +401,126 @@ class CameraSubscriber(Node):
             ]
 
         return points  
+
+    def create_area_aware_semantic_pointcloud(self, color_img, depth_img, semantic_map, num_points):
+        """
+        Area-aware semantic point cloud sampling.
+
+        Goal:
+        - Large classes get more points than small classes.
+        - Small classes still remain visible.
+        - Huge classes like wall/floor cannot dominate everything.
+        - No manual class weights needed.
+        """
+
+        class_ids = [c for c in np.unique(semantic_map) if c != 0]
+
+        if len(class_ids) == 0:
+            return np.zeros((0, 7))
+
+        # Tuning values
+        min_points_per_class = 300
+        max_fraction_per_class = 0.45
+
+        max_points_per_class = int(num_points * max_fraction_per_class)
+
+        # Count valid depth pixels per class
+        class_pixel_counts = {}
+        for class_id in class_ids:
+            count = np.count_nonzero((semantic_map == class_id) & (depth_img > 0))
+            if count > 0:
+                class_pixel_counts[class_id] = count
+
+        if len(class_pixel_counts) == 0:
+            return np.zeros((0, 7))
+
+        # Use sqrt(area), not area.
+        # This gives big classes more points, but not overwhelmingly more.
+        class_scores = {
+            class_id: np.sqrt(pixel_count)
+            for class_id, pixel_count in class_pixel_counts.items()
+        }
+
+        total_score = sum(class_scores.values())
+
+        all_points = []
+
+        for class_id, score in class_scores.items():
+            raw_budget = int(num_points * (score / total_score))
+
+            # Protect small objects, cap huge objects
+            class_budget = max(min_points_per_class, raw_budget)
+            class_budget = min(max_points_per_class, class_budget)
+
+            # Never request more points than valid pixels
+            class_budget = min(class_budget, class_pixel_counts[class_id])
+
+            points = self.create_pointcloud_from_mask_grid(
+                color_img,
+                depth_img,
+                semantic_map,
+                class_id,
+                class_budget
+            )
+
+            if len(points) > 0:
+                all_points.append(points)
+
+        if len(all_points) == 0:
+            return np.zeros((0, 7))
+
+        points = np.vstack(all_points)
+
+        # If min budgets caused too many total points, downsample back to num_points
+        if len(points) > num_points:
+            idx = np.random.choice(len(points), size=num_points, replace=False)
+            points = points[idx]
+
+        return points
+
+
+    def create_pointcloud_from_mask_grid(self, color_img, depth_img, semantic_map, class_id, num_points):
+        """
+        Stable grid-like sampling inside one semantic class.
+        This avoids random flickering and gives better visual coverage.
+        """
+
+        ys, xs = np.where((semantic_map == class_id) & (depth_img > 0))
+
+        if len(xs) == 0:
+            return np.zeros((0, 7))
+
+        n_available = len(xs)
+        n = min(num_points, n_available)
+
+        # Sort pixels spatially so sampling is more stable than pure random
+        order = np.lexsort((xs, ys))
+        xs = xs[order]
+        ys = ys[order]
+
+        # Evenly sample through the sorted mask pixels
+        if n_available > n:
+            idx = np.linspace(0, n_available - 1, n, dtype=np.int32)
+            xs = xs[idx]
+            ys = ys[idx]
+
+        points = np.zeros((len(xs), 7))
+
+        for i, (x, y) in enumerate(zip(xs, ys)):
+            Z = depth_img[y, x]
+            X = (x - self.cx) * Z / self.fx
+            Y = (y - self.cy) * Z / self.fy
+
+            color = color_img[y, x]
+            semantic_id = semantic_map[y, x]
+
+            points[i] = [
+                X, Z, -Y,
+                int(color[0]), int(color[1]), int(color[2]),
+                int(semantic_id)
+            ]
+
+        return points
     
     def rgbd_callback(self, msg):
         if self.processing:
@@ -426,7 +554,7 @@ class CameraSubscriber(Node):
 
             self.get_logger().info(f"Frame {self.frame_count}: converting depth image")
             depth_img = self.bridge.imgmsg_to_cv2(msg.depth, desired_encoding="16UC1")
-            depth_img = (depth_img / 1000.0) * 2
+            depth_img = depth_img.astype(np.float32) / 1000.0
 
             original_h, original_w = color_img.shape[:2]
             self.get_logger().info(
@@ -697,7 +825,14 @@ class CameraSubscriber(Node):
             #    tracked_position,
             #)
 
-            points = self.create_balanced_semantic_pointcloud(
+            #points = self.create_balanced_semantic_pointcloud(
+            #    semantic_map_color,
+            #    depth_img,
+            #    semantic_map,
+            #    self.num_points
+            #)
+
+            points = self.create_area_aware_semantic_pointcloud(
                 semantic_map_color,
                 depth_img,
                 semantic_map,
@@ -724,10 +859,23 @@ class CameraSubscriber(Node):
             )
 
             if len(points) > 0:
+                # Correct metric pointcloud
                 self.pointcloud_publisher.publish(
                     pointcloud.create_pointcloud_msg(points, 'map')
                 )
-                self.get_logger().info(f"Frame {self.frame_count}: pointcloud published")
+
+                # Visualization-only scaled pointcloud
+                points_visual = points.copy()
+                points_visual[:, 0:3] *= 2.0
+
+                self.pointcloud_visual_publisher.publish(
+                    pointcloud.create_pointcloud_msg(points_visual, 'map')
+                )
+
+                self.get_logger().info(
+                    f"Frame {self.frame_count}: pointcloud published "
+                    f"(/pointcloud metric, /pointcloud_visual scaled)"
+                )
             else:
                 self.get_logger().warn(f"Frame {self.frame_count}: no points generated from mask")
 

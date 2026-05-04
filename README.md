@@ -19,7 +19,8 @@ Last updated: May 1 2026
 - [x] Add semantic class input in the UI, including multiple comma-separated class names.
 - [x] Improve semantic pointcloud sampling using balanced/random per-class sampling.
 
-- [ ] Fix depth scaling and verify metric 3D pointcloud distances.
+- [x] Fix depth scaling and verify metric 3D pointcloud distances.
+- [ ] Look into a better way to show all classes in a pointcloud / 		Refine pointcloud algorithm.
 - [ ] Refactor `camera_subscriber.py` into smaller modules/functions.
 - [ ] Run performance tests with different class prompts and `sam3_run_every_n_frames`.
 - [ ] Run robustness tests with occlusion, motion blur, noisy/missing depth.
