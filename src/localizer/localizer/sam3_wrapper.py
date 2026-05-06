@@ -8,7 +8,6 @@ from PIL import Image
 from sam3.model_builder import build_sam3_image_model
 from sam3.model.sam3_image_processor import Sam3Processor
 
-
 class SAM3Wrapper:
     def __init__(self, default_prompt: str = "", resolution: int = 1008):
         self.default_prompt = default_prompt

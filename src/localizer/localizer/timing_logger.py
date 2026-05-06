@@ -3,7 +3,6 @@ import os
 import time
 from datetime import datetime
 
-
 class TimingLogger:
     def __init__(self, output_dir="timing_results"):
         os.makedirs(output_dir, exist_ok=True)

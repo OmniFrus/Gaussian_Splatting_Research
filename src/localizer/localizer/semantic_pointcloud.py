@@ -1,6 +1,5 @@
 import numpy as np
 
-
 def create_pointcloud(color_img, depth_img, semantic_map, num_points, original_img_size, offset, fx, fy, cx, cy):
     h, w = depth_img.shape[:2]
     granularity = int(np.sqrt((w * h) / num_points))
