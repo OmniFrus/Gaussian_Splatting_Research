@@ -19,18 +19,35 @@ class TimingLogger:
             "stage",
             "elapsed_seconds",
             "num_masks",
-            "num_points"
+            "num_points",
+            "fps",
+            "vram_mb",
+            "num_classes"
         ])
         self.file.flush()
 
-    def log(self, frame, class_name, stage, elapsed_seconds, num_masks=0, num_points=0):
+    def log(
+        self,
+        frame,
+        class_name,
+        stage,
+        elapsed_seconds,
+        num_masks=0,
+        num_points=0,
+        fps=0.0,
+        vram_mb=0.0,
+        num_classes=0
+    ):
         self.writer.writerow([
             frame,
             class_name,
             stage,
             round(elapsed_seconds, 4),
             num_masks,
-            num_points
+            num_points,
+            round(fps, 2),
+            round(vram_mb, 1),
+            num_classes
         ])
         self.file.flush()
 

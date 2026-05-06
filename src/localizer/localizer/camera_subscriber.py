@@ -66,7 +66,7 @@ class CameraSubscriber(Node):
 
         self.declare_parameter('confidence', 0.2)
         self.declare_parameter('num_points', 10000)
-        self.declare_parameter('sam3_run_every_n_frames', 1)
+        self.declare_parameter('sam3_run_every_n_frames', 5)
         
         self.confidence = self.get_parameter('confidence').get_parameter_value().double_value
         self.num_points = self.get_parameter('num_points').get_parameter_value().integer_value
@@ -280,6 +280,7 @@ class CameraSubscriber(Node):
 
         self.processing = True
         self.frame_count += 1
+        frame_start_time = time.perf_counter()
         self.get_logger().info(f"RGBD callback received, frame {self.frame_count}")
 
         if self.frame_count % 5 == 0:
@@ -482,6 +483,15 @@ class CameraSubscriber(Node):
                 f"Frame {self.frame_count}: generated_pointcloud_points={len(points)}"
             )
 
+            total_frame_time = time.perf_counter() - frame_start_time
+            pipeline_fps = 1.0 / total_frame_time if total_frame_time > 0 else 0.0
+            
+            vram_mb = 0.0
+            if torch.cuda.is_available():
+                vram_mb = torch.cuda.memory_allocated() / (1024 * 1024)
+
+            num_classes = len(np.unique(semantic_map)) - 1
+
             self.timing_logger.log(
                 frame=self.frame_count,
                 class_name="ALL",
@@ -489,6 +499,18 @@ class CameraSubscriber(Node):
                 elapsed_seconds=pc_elapsed,
                 num_masks=0,
                 num_points=len(points)
+            )
+
+            self.timing_logger.log(
+                frame=self.frame_count,
+                class_name="ALL",
+                stage="full_pipeline",
+                elapsed_seconds=total_frame_time,
+                num_masks=0,
+                num_points=len(points),
+                fps=pipeline_fps,
+                vram_mb=vram_mb,
+                num_classes=num_classes
             )
 
             self.get_logger().info(
@@ -502,16 +524,15 @@ class CameraSubscriber(Node):
                 )
 
                 # Visualization-only scaled pointcloud
-                points_visual = points.copy()
-                points_visual[:, 0:3] *= 2.0
+                #points_visual = points.copy()
+                #points_visual[:, 0:3] *= 2.0
 
-                self.pointcloud_visual_publisher.publish(
-                    pointcloud.create_pointcloud_msg(points_visual, 'map')
-                )
+                #self.pointcloud_visual_publisher.publish(
+                #    pointcloud.create_pointcloud_msg(points_visual, 'map')
+                #)
 
                 self.get_logger().info(
                     f"Frame {self.frame_count}: pointcloud published "
-                    f"(/pointcloud metric, /pointcloud_visual scaled)"
                 )
             else:
                 self.get_logger().warn(f"Frame {self.frame_count}: no points generated from mask")
